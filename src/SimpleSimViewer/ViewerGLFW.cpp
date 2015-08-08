@@ -180,7 +180,8 @@ Viewer::Viewer(std::shared_ptr<BaseSim> i_simPtr, bool i_anim)
 
   // Make it all modern-like.
   // glfwWindowHint( GLFW_CLIENT_API, GLFW_OPENGL_API );
-  glfwWindowHint(GLFW_SAMPLES, 4);
+  //glfwWindowHint(GLFW_SAMPLES, 4);
+  glfwWindowHint(GLFW_SAMPLES, 1);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
@@ -215,6 +216,8 @@ Viewer::Viewer(std::shared_ptr<BaseSim> i_simPtr, bool i_anim)
   glfwSetCursorPosCallback(m_window, g_mouseDrag);
   glfwSetMouseButtonCallback(m_window, g_mouse);
   glfwSetWindowSizeCallback(m_window, g_reshape);
+
+  glDisable(GL_MULTISAMPLE);
 
   // Main loop.
   while (!glfwWindowShouldClose(m_window)) {

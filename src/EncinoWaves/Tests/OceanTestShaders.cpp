@@ -151,6 +151,36 @@ void main(void) {
 )";
 
 //-*****************************************************************************
+static const char* g_simpleGeometryShaderBase =
+  R"(
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 3) out;
+in vec3 g_Pwld[3];
+in vec3 g_Nwld[3];
+in float g_crest[3];
+out vec3 gs_Pwld;
+out vec3 gs_Nwld;
+out float gs_crest;
+
+uniform mat4 projection_matrix;
+uniform mat4 modelview_matrix;
+uniform vec4 g_offset;
+
+void main(void) {
+    mat4 pmvMat = projection_matrix * modelview_matrix;
+    for (int i = 0; i < 3; ++i) {
+        gl_Position = pmvMat * ( g_offset + gl_in[i].gl_Position );
+        gs_Pwld = g_Pwld[i] + g_offset.xyz;
+        gs_Nwld = g_Nwld[i];
+        gs_crest = g_crest[i];
+        EmitVertex();
+    }
+    EndPrimitive();
+}
+)";
+
+
+//-*****************************************************************************
 static const char* g_fragmentShaderBaseSimple =
   R"(
     out vec4 gl_FragColor;
@@ -465,7 +495,7 @@ static const char* g_fragmentShaderBase =
         vec3 T = vec3( 0, 1, 0 );
         float kr = 1;
         float kt = 1;
-        myRefract( In, Nn, 1.0, 1.33, R, T, kr, kt );
+        myRefract( In, Nn, 1.0, 1.3, R, T, kr, kt );
 
         if ( R.z < 0 ) { R.z = -R.z; };
         float Rtheta, Rphi;
@@ -509,7 +539,7 @@ static const char* g_fragmentShaderBase =
         vec3 finalCol = ( kr * sky )       +
                         ( Cspec )          +
                         ( 10 * kt * deep2 )     +
-                        ( 0.175 * kt * deep ) +
+                        ( 0.075 * kt * deep ) +
                         ( 0.001 * Cdiff );
         if ( g_minClipE < g_maxClipE )
         {
@@ -743,7 +773,7 @@ static const char* g_fragmentShaderTextureSkyBase =
         vec3 T = vec3( 0, 1, 0 );
         float kr = 1;
         float kt = 1;
-        myRefract( In, Nn, 1.0, 1.33, R, T, kr, kt );
+        myRefract( In, Nn, 1.0, 1.3, R, T, kr, kt );
 
         if ( R.z < 0 ) { R.z = -R.z; };
 
@@ -774,13 +804,13 @@ static const char* g_fragmentShaderTextureSkyBase =
                     PacificBeta *
                     HGPhase( PacificG, .1*3.141592 );
 
-        vec3 Cspec = g_sun_color * kr * 1 *
+        vec3 Cspec = g_sun_color * kr * .01 *
             kSpecular( In, Nn, g_to_sun, 800 );
 
         vec3 finalCol = ( kr * sky )       +
                         ( Cspec )          +
                         ( kt * deep2 )     +
-                        ( 0.175 * kt * deep ) +
+                        ( 0.375 * kt * deep ) +
                         ( 0.001 * Cdiff );
         if ( g_minClipE < g_maxClipE )
         {
@@ -868,7 +898,7 @@ std::string VertexShader() {
 
 //-*****************************************************************************
 std::string GeometryShader() {
-  return std::string(g_shaderHeader) + std::string(g_geometryShaderBase);
+  return std::string(g_shaderHeader) + std::string(g_simpleGeometryShaderBase);
 }
 
 //-*****************************************************************************

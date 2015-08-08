@@ -110,20 +110,14 @@ Mesh::Mesh(const ewav::Parametersf& i_wparams, const Sky::Parameters& i_sparams,
   for (int j = 0; j < N; ++j) {
     for (int i = 0; i < N; ++i, index += 6) {
       // First triangle.
-      m_indices[index] =
-        wrap(i + 1, N + 1) + (N + 1) * wrap(j, N + 1);
-      m_indices[index + 1] =
-        wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
-      m_indices[index + 2] =
-        wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
+      m_indices[index]     = wrap(i + 1, N + 1) + (N + 1) * wrap(j, N + 1);
+      m_indices[index + 1] = wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
+      m_indices[index + 2] = wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
 
       // Second triangle.
-      m_indices[index + 3] =
-        wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
-      m_indices[index + 4] =
-        wrap(i, N + 1) + (N + 1) * wrap(j + 1, N + 1);
-      m_indices[index + 5] =
-        wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
+      m_indices[index + 3] = wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
+      m_indices[index + 4] = wrap(i, N + 1) + (N + 1) * wrap(j + 1, N + 1);
+      m_indices[index + 5] = wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
     }
   }
 
@@ -292,6 +286,10 @@ void Mesh::setCameraUniforms(
   const EncinoWaves::SimpleSimViewer::GLCamera& i_cam) {
   M44d pm  = i_cam.projectionMatrix();
   M44d mvm = i_cam.modelViewMatrix();
+  M44d rotate_around_z;
+  rotate_around_z.setAxisAngle(V3d(0.0, 0.0, 1.0),
+                               radians(double(m_drawParams.wind_rotation)));
+  mvm = rotate_around_z * mvm;
   (*m_program)(Uniform("projection_matrix", pm));
   (*m_program)(Uniform("modelview_matrix", mvm));
 
@@ -511,9 +509,30 @@ void Mesh::draw(const EncinoWaves::SimpleSimViewer::GLCamera& i_cam) {
   setWavesUniforms();
   m_program->setUniforms();
 
+#if 0
   // Draw the elements
   glDrawElements(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, 0);
   UtilGL::CheckErrors("glDrawElements");
+#else
+
+  int repeat = m_drawParams.repeat;
+
+  repeat = clamp(repeat, 1, 3);
+  V4f input_origin =
+    V4f(-0.5f * m_params.domain, -0.5f * m_params.domain, 0.0f, 0.0f);
+  V4f repeat_origin = V4f(-0.5f * float(repeat) * m_params.domain,
+                          -0.5f * float(repeat) * m_params.domain, 0.0f, 0.0f);
+  V4f offset_origin = repeat_origin - input_origin;
+  for (int kj = 0; kj < repeat; ++kj) {
+    for (int ki = 0; ki < repeat; ++ki) {
+      V4f offset = offset_origin + V4f(m_params.domain * float(ki),
+                                       m_params.domain * float(kj), 0.0f, 0.0f);
+      (*m_program)(Uniform("g_offset", offset));
+      m_program->setUniforms();
+      glDrawElements(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, 0);
+    }
+  }
+#endif
 
   // Unuse the program
   m_program->unuse();

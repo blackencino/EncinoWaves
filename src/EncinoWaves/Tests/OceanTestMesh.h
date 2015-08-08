@@ -46,9 +46,9 @@ namespace OceanTest {
 class Mesh {
 public:
   struct DrawParameters {
-    int repeat;
-    DrawParameters()
-      : repeat(1) {}
+    int repeat = 2;
+    float wind_rotation = 45.0f;
+    DrawParameters() = default;
   };
 
   Mesh(const ewav::Parametersf& i_wparams, const Sky::Parameters& i_sparams,
@@ -67,6 +67,7 @@ public:
 
   const ewav::Parametersf& wavesParams() const { return m_params; }
   void setWavesParams(const ewav::Parametersf& i_params);
+  void setDrawParams(const DrawParameters& dparams) { m_drawParams = dparams; }
 
 protected:
   void createProgram();

@@ -194,6 +194,11 @@ ViewScene::ViewScene(const ewav::Parametersf& i_params,
                                    1000.0f, 0.25f, 2.0f));
   m_paramEdits.push_back(pedit);
 
+  pedit.reset(new FloatParamEditor("wind rotation",
+                                   &m_drawParams.wind_rotation, -360.0f, 360.0f,
+                                   1.0f, 10.0f));
+  m_paramEdits.push_back(pedit);
+
   // Set edit to wind speed.
   m_paramEditPosition = 2;
 
@@ -275,6 +280,7 @@ void ViewScene::keyboard(int i_key, int i_scancode, int i_action, int i_mods,
   if (doEditMesh && m_mesh) {
     enableParamEdits();
     m_mesh->setWavesParams(m_params);
+    m_mesh->setDrawParams(m_drawParams);
   }
 
   SimpleSimViewer::Sim3D::keyboard(i_key, i_scancode, i_action, i_mods, i_x,
