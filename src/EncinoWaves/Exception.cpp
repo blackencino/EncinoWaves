@@ -31,3 +31,15 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#include "Exception.h"
+
+namespace EncinoWaves {
+
+//-*****************************************************************************
+void __EWAV_DEBUG_ASSERT_FAIL(const char* msg) throw() {
+  std::cerr << msg << std::endl;
+  abort();
+}
+
+}  // namespace EncinoWaves

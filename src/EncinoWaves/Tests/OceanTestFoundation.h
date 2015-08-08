@@ -31,3 +31,46 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#ifndef _EncinoWaves_OceanTest_Foundation_h_
+#define _EncinoWaves_OceanTest_Foundation_h_
+
+#include <EncinoWaves/All.h>
+
+#include <Util/All.h>
+#include <GeepGLFW/All.h>
+#include <SimpleSimViewer/All.h>
+
+#include <OpenEXR/ImfRgba.h>
+#include <OpenEXR/ImfRgbaFile.h>
+
+#include <boost/timer.hpp>
+#include <boost/format.hpp>
+#include <boost/smart_ptr.hpp>
+#include <boost/algorithm/string/find.hpp>
+#include <boost/preprocessor/stringize.hpp>
+#include <boost/program_options.hpp>
+
+#include <iostream>
+#include <utility>
+#include <vector>
+#include <string>
+
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+#include <math.h>
+
+namespace OceanTest {
+
+//-*****************************************************************************
+namespace ewav = EncinoWaves;
+using namespace EncinoWaves;
+using namespace EncinoWaves::Util;
+using namespace EncinoWaves::GeepGLFW;
+
+}  // namespace OceanTest
+
+#endif

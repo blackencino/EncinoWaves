@@ -31,3 +31,45 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#ifndef _EncinoWaves_OceanTestSky_h_
+#define _EncinoWaves_OceanTestSky_h_
+
+#include "OceanTestFoundation.h"
+
+namespace OceanTest {
+
+//-*****************************************************************************
+class Sky {
+public:
+  struct Parameters {
+    std::string filename;
+    double time;
+    double day;
+    double latitude;
+    double longitude;
+    double GMT_offset;
+    double turbidity;
+
+    Parameters()
+      : filename("")
+      , time(23.0)           // 24 hour clock
+      , day(235.0)           // day out of 365
+      , latitude(37.783)     // san francisco
+      , longitude(122.4167)  // san francisco
+      , GMT_offset(17.0)     // san francisco is GMT-7
+      , turbidity(0.9) {}
+  };
+
+  Sky(const Parameters& i_params)
+    : m_params(i_params) {}
+
+  void setUniforms(GeepGLFW::Program& i_program) const;
+
+protected:
+  Parameters m_params;
+};
+
+}  // namespace OceanTest
+
+#endif

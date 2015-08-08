@@ -31,3 +31,37 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#ifndef _EncinoWaves_OceanTestEnvSphere_h_
+#define _EncinoWaves_OceanTestEnvSphere_h_
+
+#include "OceanTestFoundation.h"
+#include "OceanTestTextureSky.h"
+
+namespace OceanTest {
+
+class EnvSphere {
+public:
+  EnvSphere();
+  ~EnvSphere();
+
+  void draw(const EncinoWaves::SimpleSimViewer::GLCamera& i_camera,
+            const TextureSky& sky);
+
+protected:
+  void createProgram();
+  void setCameraUniforms(
+    const EncinoWaves::SimpleSimViewer::GLCamera& i_camera);
+
+  // The VAO and VBOs
+  GLuint m_vertexArrayObject;
+  GLuint m_vertexBuffers[2];
+  size_t m_num_indices;
+
+  // The Program.
+  std::unique_ptr<GeepGLFW::Program> m_program;
+};
+
+}  // namespace OceanTest
+
+#endif

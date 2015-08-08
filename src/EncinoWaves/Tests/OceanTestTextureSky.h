@@ -31,3 +31,29 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#ifndef _EncinoWaves_OceanTest_TextureSky_hpp_
+#define _EncinoWaves_OceanTest_TextureSky_hpp_
+
+#include "OceanTestFoundation.h"
+
+namespace OceanTest {
+
+class TextureSky {
+public:
+  TextureSky(const std::string& filename);
+  ~TextureSky();
+
+  void bind(GLuint program_id) const;
+
+private:
+  GLuint m_tex_id;
+  V3f m_to_sun;
+  V3f m_sun_color;
+  V3f m_to_moon;
+  V3f m_moon_color;
+};
+
+}  // namespace OceanTest
+
+#endif  // _EncinoWaves_OceanTest_TextureSky_hpp_

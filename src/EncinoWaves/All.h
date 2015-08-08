@@ -31,3 +31,24 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#ifndef _EncinoWaves_All_h_
+#define _EncinoWaves_All_h_
+
+#include "Basics.h"
+#include "DirectionalSpreading.h"
+#include "Dispersion.h"
+#include "FftwWrapper.h"
+#include "Filter.h"
+#include "Foundation.h"
+#include "InitialState.h"
+#include "MipMap.h"
+#include "Normals.h"
+#include "Parameters.h"
+#include "Propagation.h"
+#include "Random.h"
+#include "Spectra.h"
+#include "SpectralSpatialField.h"
+#include "Stats.h"
+
+#endif

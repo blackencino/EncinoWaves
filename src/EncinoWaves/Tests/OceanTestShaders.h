@@ -31,3 +31,17 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#include "OceanTestFoundation.h"
+
+namespace OceanTest {
+
+//-*****************************************************************************
+std::string VertexShader();
+std::string GeometryShader();
+std::string FragmentShader(const std::string &i_prefixIn, bool texture_sky);
+
+std::string EnvVertexShader();
+std::string EnvFragmentShader();
+
+}  // namespace OceanTest

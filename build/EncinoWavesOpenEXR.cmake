@@ -1,0 +1,15 @@
+#-******************************************************************************
+
+# FIND_PACKAGE( OpenEXR REQUIRED )
+FIND_PACKAGE( OpenEXR )
+
+IF( OPENEXR_FOUND )
+  SET( EWAV_OPENEXR_INCLUDE_PATH ${OPENEXR_INCLUDE_PATHS} )
+  SET( EWAV_OPENEXR_LIBRARIES ${OPENEXR_LIBRARIES} )
+  # SET( EWAV_OPENEXR_DEFINITIONS ${OPENEXR_DEFINITIONS} )
+
+  SET( EWAV_OPENEXR_FOUND 1 CACHE STRING "Set to 1 if OpenEXR is found, 0 otherwise" )
+ELSE()
+  SET( EWAV_OPENEXR_FOUND 0 CACHE STRING "Set to 1 if OpenEXR is found, 0 otherwise" )
+ENDIF()
+

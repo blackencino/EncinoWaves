@@ -14,20 +14,51 @@
 // limitations under the License.
 //-*****************************************************************************
 
+#ifndef _EncinoWaves_GeepGLFW_Foundation_h_
+#define _EncinoWaves_GeepGLFW_Foundation_h_
+
+#define GLFW_INCLUDE_GLU 1
+
 //-*****************************************************************************
-// The basic architecture of these Waves is based on the TweakWaves application
-// written by Chris Horvath for Tweak Films in 2001.  This, in turn, was based
-// on the SIGGRAPH papers and courses by Jerry Tessendorf, and by the paper
-// "A Simple Fluid Solver based on the FTT" by Jos Stam.
-//
-// The TMA, JONSWAP, and Pierson Moskowitz Wave Spectra, as well as the
-// directional spreading functions are formulated based on the descriptions
-// given in "Ocean Waves: The Stochastic Approach",
-// by Michel K. Ochi, published by Cambridge Ocean Technology Series, 1998,2005.
-//
-// This library is written as a working implementation of the paper:
-// Christopher J. Horvath. 2015.
-// Empirical directional wave spectra for computer graphics.
-// In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
-// Los Angeles, Aug. 8, 2015, pp. 29-39.
+// MAC INCLUDES
 //-*****************************************************************************
+#ifndef PLATFORM_DARWIN
+
+#include <GL/glew.h>
+
+#else
+
+//#include <OpenGL/gl3.h>
+
+#endif  // ifdef PLATFORM_DARWIN
+
+#define GLFW_INCLUDE_GLCOREARB
+#undef GLFW_INCLUDE_GLU
+#include <GLFW/glfw3.h>
+
+#ifdef PLATFORM_DARWIN
+#include <OpenGL/glext.h>
+#endif
+
+#include <Util/All.h>
+
+#include <vector>
+#include <iostream>
+#include <string>
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
+namespace EncinoWaves {
+namespace GeepGLFW {
+
+//-*****************************************************************************
+// NOTHING
+//-*****************************************************************************
+
+}  // namespace GeepGLFW
+}  // namespace EncinoWaves
+
+#endif

@@ -31,3 +31,12 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#include "Foundation.h"
+
+namespace EncinoWaves {
+
+//-*****************************************************************************
+tbb::mutex g_printMutex;
+
+} // namespace EncinoWaves

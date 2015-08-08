@@ -31,3 +31,19 @@
 // In Proceedings of the 2015 Symposium on Digital Production (DigiPro '15),
 // Los Angeles, Aug. 8, 2015, pp. 29-39.
 //-*****************************************************************************
+
+#include "FftwWrapper.h"
+
+namespace EncinoWaves {
+
+//-*****************************************************************************
+// Global instantiation of these static members.
+
+std::unique_ptr< __BaseFftwInitThreadsT<float>::Init >
+    __BaseFftwInitThreadsT<float>::sm_init;
+
+std::unique_ptr< __BaseFftwInitThreadsT<double>::Init >
+    __BaseFftwInitThreadsT<double>::sm_init;
+
+} // namespace EncinoWaves
+
