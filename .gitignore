@@ -1,0 +1,18 @@
+*.a
+*.cmake
+*.tcl
+
+CmakeCache.txt
+CMakeFiles
+Makefile
+
+# External dependencies dir
+needs
+
+# Executables and temp dirs
+EncinoWaves
+glfw_helloWorld
+glfw_helloWorld2
+test_ewav_*
+test_SSV_*
+test_util_*
