@@ -71,7 +71,6 @@
 #include <string.h>
 #include <float.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 namespace EncinoWaves {
 

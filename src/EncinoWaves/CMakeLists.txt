@@ -32,49 +32,32 @@
 ## Los Angeles, Aug. 8, 2015, pp. 29-39.
 ##-*****************************************************************************
 
-SET( H_FILES
-     All.h
-     Basics.h
-     DirectionalSpreading.h
-     Dispersion.h
-     FftwWrapper.h
-     Filter.h
-     Foundation.h
-     InitialState.h
-     MipMap.h
-     Normals.h
-     Parameters.h
-     Propagation.h
-     Random.h
-     Spectra.h
-     SpectralSpatialField.h
-     Stats.h
-     )
+encino_waves_define_library(waves
+  HEADERS
+    All.h
+    Basics.h
+    DirectionalSpreading.h
+    Dispersion.h
+    FftwWrapper.h
+    Filter.h
+    Foundation.h
+    InitialState.h
+    MipMap.h
+    Normals.h
+    Parameters.h
+    Propagation.h
+    Random.h
+    Spectra.h
+    SpectralSpatialField.h
+    Stats.h
+  SOURCES
+    Foundation.cpp
+    FftwWrapper.cpp
+  DEPENDENCIES
+    encino_waves::util
+    TBB::TBB
+    FFTW3::FFTW3
+    OpenEXR::OpenEXR
+  )
 
-SET( CXX_FILES
-     Foundation.cpp
-     FftwWrapper.cpp
-     )
-
-SET( SOURCE_FILES ${CXX_FILES} ${H_FILES} )
-
-# Create the library
-ADD_LIBRARY( EncinoWavesEncinoWaves ${SOURCE_FILES} )
-
-# Recurse into test subdirectory
-ADD_SUBDIRECTORY( Tests )
-
-#-******************************************************************************
-#-******************************************************************************
-# INSTALLATION
-#-******************************************************************************
-#-******************************************************************************
-
-INSTALL( TARGETS EncinoWavesEncinoWaves
-         LIBRARY DESTINATION lib
-         ARCHIVE DESTINATION lib/static )
-
-INSTALL( FILES ${H_FILES}
-         DESTINATION include/EncinoWaves/EncinoWaves
-         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ )
-
+add_subdirectory(Tests)

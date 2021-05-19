@@ -14,27 +14,20 @@
 ## limitations under the License.
 ##-*****************************************************************************
 
-# C++ files for this project
-SET( H_FILES
-     Exception.h
-     Foundation.h
-     Functions.h
-     Timer.h
-     All.h )
+encino_waves_define_library(util
+  HEADERS
+    Exception.h 
+    Foundation.h 
+    Functions.h 
+    Timer.h
+    All.h
+  SOURCES
+    Exception.cpp
+  DEPENDENCIES
+    Alembic::Alembic 
+    OpenEXR::OpenEXR
+  )
 
-SET( CXX_FILES
-     Exception.cpp )
+add_subdirectory(Tests)
 
-SET( SOURCE_FILES ${CXX_FILES} ${H_FILES} )
 
-ADD_LIBRARY( EncinoWavesUtil ${SOURCE_FILES} )
-
-INSTALL( TARGETS EncinoWavesUtil
-         LIBRARY DESTINATION lib
-         ARCHIVE DESTINATION lib/static )
-
-INSTALL( FILES ${H_FILES}
-         DESTINATION include/EncinoWaves/Util
-         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ )
-
-ADD_SUBDIRECTORY( Tests )

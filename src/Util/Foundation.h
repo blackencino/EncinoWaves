@@ -17,7 +17,7 @@
 #ifndef _EncinoWaves_Util_Foundation_h_
 #define _EncinoWaves_Util_Foundation_h_
 
-#include <sys/time.h>
+// #include <sys/time.h>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -34,9 +34,9 @@
 #include <type_traits>
 #include <vector>
 
-#include <ImathMath.h>
-#include <ImathVec.h>
-#include <half.h>
+#include <OpenEXR/ImathMath.h>
+#include <OpenEXR/ImathVec.h>
+#include <OpenEXR/half.h>
 
 #include <Alembic/AbcGeom/All.h>
 #include <Alembic/Util/All.h>

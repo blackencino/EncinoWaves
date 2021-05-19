@@ -405,19 +405,19 @@ protected:
 //-*****************************************************************************
 
 typedef RealSpatialField2D<float> RSpatialField2Df;
-typedef RealSpatialField2D<double> RSpatialField2Dd;
+//typedef RealSpatialField2D<double> RSpatialField2Dd;
 
 typedef ComplexSpatialField2D<float> CSpatialField2Df;
-typedef ComplexSpatialField2D<double> CSpatialField2Dd;
+//typedef ComplexSpatialField2D<double> CSpatialField2Dd;
 
 typedef RealSpectralField2D<float> RSpectralField2Df;
-typedef RealSpectralField2D<double> RSpectralField2Dd;
+//typedef RealSpectralField2D<double> RSpectralField2Dd;
 
 typedef ComplexSpectralField2D<float> CSpectralField2Df;
-typedef ComplexSpectralField2D<double> CSpectralField2Dd;
+//typedef ComplexSpectralField2D<double> CSpectralField2Dd;
 
 typedef SpectralToSpatial2D<float> SpectralToSpatial2Df;
-typedef SpectralToSpatial2D<double> SpectralToSpatial2Dd;
+//typedef SpectralToSpatial2D<double> SpectralToSpatial2Dd;
 
 }  // namespace EncinoWaves
 

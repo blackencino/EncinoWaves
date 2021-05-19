@@ -75,23 +75,7 @@ public:
 //-*****************************************************************************
 // This is for aborting in a debug mode to make a more traceable stack.
 
-#ifdef PLATFORM_DARWIN
-
-#if defined __cplusplus
 #define __EWAV_DEBUG_ASSERT_VOID_CAST static_cast<void>
-#else
-#define __EWAV_DEBUG_ASSERT_VOID_CAST (void)
-#endif
-
-#else
-
-#if defined __cplusplus && __GNUC_PREREQ(2, 95)
-#define __EWAV_DEBUG_ASSERT_VOID_CAST static_cast<void>
-#else
-#define __EWAV_DEBUG_ASSERT_VOID_CAST (void)
-#endif
-
-#endif
 
 extern void __EWAV_DEBUG_ASSERT_FAIL(const char *msg) throw();
 

@@ -21,6 +21,6 @@
 
 #include "Exception.h"
 #include "Functions.h"
-#include "Timer.h"
+//#include "Timer.h"
 
 #endif

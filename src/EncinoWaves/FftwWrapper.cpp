@@ -42,8 +42,8 @@ namespace EncinoWaves {
 std::unique_ptr< __BaseFftwInitThreadsT<float>::Init >
     __BaseFftwInitThreadsT<float>::sm_init;
 
-std::unique_ptr< __BaseFftwInitThreadsT<double>::Init >
-    __BaseFftwInitThreadsT<double>::sm_init;
+//std::unique_ptr< __BaseFftwInitThreadsT<double>::Init >
+//    __BaseFftwInitThreadsT<double>::sm_init;
 
 } // namespace EncinoWaves
 

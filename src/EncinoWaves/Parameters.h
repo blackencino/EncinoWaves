@@ -171,7 +171,7 @@ struct Parameters {
 
 //-*****************************************************************************
 typedef Parameters<float> Parametersf;
-typedef Parameters<double> Parametersd;
+// typedef Parameters<double> Parametersd;
 
 }  // namespace EncinoWaves
 

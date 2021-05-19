@@ -32,86 +32,52 @@
 ## Los Angeles, Aug. 8, 2015, pp. 29-39.
 ##-*****************************************************************************
 
-SET( THIS_LIBS
-  EncinoWavesEncinoWaves
-  ${EWAV_FFTW_LIBS}
-  ${EWAV_OPENEXR_LIBS}
-  ${EWAV_ILMBASE_LIBS}
-  ${EWAV_BOOST_LIBS}
-  ${EWAV_TBB_LIBS}
-  ${EWAV_GL_LIBS}
-  ${EWAV_THREAD_LIBS}
-  ${EWAV_Z_LIBS} m )
+##-----------------------------------------------------------------------------
+# Tests
+foreach(_test
+        Fftw 
+        InitialState 
+        MipMap
+        Propagation)
+    encino_waves_define_test(waves_test_${_test}
+    SOURCES
+        test_${_test}.cpp
+    DEPENDENCIES
+        encino_waves::waves
+        encino_waves::util
+        TBB::TBB
+        Boost::Boost
+    )
+endforeach()
 
-SET( OCEAN_TEST_LIBS
-    EncinoWavesEncinoWaves
-    EncinoWavesSimpleSimViewer
-    EncinoWavesGeepGLFW
-    EncinoWavesUtil
-    ${EWAV_ALEMBIC_LIBS}
-    ${EWAV_HDF5_LIBS}
-    ${EWAV_FFTW_LIBS}
-    ${EWAV_OPENEXR_LIBS}
-    ${EWAV_ILMBASE_LIBS}
-    ${EWAV_BOOST_LIBS}
-    ${EWAV_TBB_LIBS}
-    ${EWAV_GL_LIBS}
-    ${EWAV_THREAD_LIBS}
-    ${EWAV_Z_LIBS} m )
+# ##-*****************************************************************************
+# # Ocean Test
+# SET( OCEAN_TEST_H
+#      OceanTestFoundation.h
+#      OceanTestEnvSphere.h
+#      OceanTestShaders.h
+#      OceanTestViewScene.h
+#      OceanTestSky.h
+#      OceanTestTextureSky.h
+#      OceanTestMesh.h
+#      )
+# SET( OCEAN_TEST_CPP
+#      OceanTestShaders.cpp
+#      OceanTestEnvSphere.cpp
+#      OceanTestViewScene.cpp
+#      OceanTestMain.cpp
+#      OceanTestSky.cpp
+#      OceanTestTextureSky.cpp
+#      OceanTestMesh.cpp
+#      )
+# ADD_EXECUTABLE( ewav_OceanTest ${OCEAN_TEST_H} ${OCEAN_TEST_CPP} )
+# TARGET_LINK_LIBRARIES( ewav_OceanTest ${OCEAN_TEST_LIBS} )
+# SET_TARGET_PROPERTIES( ewav_OceanTest
+#                        PROPERTIES
+#                        OUTPUT_NAME "EncinoWaves" )
 
-#-******************************************************************************
-# FFTW Test
-ADD_EXECUTABLE( test_ewav_Fftw test_Fftw.cpp )
-TARGET_LINK_LIBRARIES( test_ewav_Fftw ${THIS_LIBS} )
-ADD_TEST( TEST_ewav_Fftw test_ewav_Fftw )
-
-
-#-******************************************************************************
-# InitialState Test
-ADD_EXECUTABLE( test_ewav_InitialState test_InitialState.cpp )
-TARGET_LINK_LIBRARIES( test_ewav_InitialState ${THIS_LIBS} )
-ADD_TEST( TEST_ewav_InitialState test_ewav_InitialState )
-
-#-******************************************************************************
-# Propagation Test
-ADD_EXECUTABLE( test_ewav_Propagation test_Propagation.cpp )
-TARGET_LINK_LIBRARIES( test_ewav_Propagation ${THIS_LIBS} )
-ADD_TEST( TEST_ewav_Propagation test_ewav_Propagation )
-
-#-******************************************************************************
-# MipMap Test
-ADD_EXECUTABLE( test_ewav_MipMap test_MipMap.cpp )
-TARGET_LINK_LIBRARIES( test_ewav_MipMap ${THIS_LIBS} )
-ADD_TEST( TEST_ewav_MipMap test_ewav_MipMap )
-
-##-*****************************************************************************
-# Ocean Test
-SET( OCEAN_TEST_H
-     OceanTestFoundation.h
-     OceanTestEnvSphere.h
-     OceanTestShaders.h
-     OceanTestViewScene.h
-     OceanTestSky.h
-     OceanTestTextureSky.h
-     OceanTestMesh.h
-     )
-SET( OCEAN_TEST_CPP
-     OceanTestShaders.cpp
-     OceanTestEnvSphere.cpp
-     OceanTestViewScene.cpp
-     OceanTestMain.cpp
-     OceanTestSky.cpp
-     OceanTestTextureSky.cpp
-     OceanTestMesh.cpp
-     )
-ADD_EXECUTABLE( ewav_OceanTest ${OCEAN_TEST_H} ${OCEAN_TEST_CPP} )
-TARGET_LINK_LIBRARIES( ewav_OceanTest ${OCEAN_TEST_LIBS} )
-SET_TARGET_PROPERTIES( ewav_OceanTest
-                       PROPERTIES
-                       OUTPUT_NAME "EncinoWaves" )
-
-INSTALL( TARGETS ewav_OceanTest
-         DESTINATION bin )
+# INSTALL( TARGETS ewav_OceanTest
+#          DESTINATION bin )
 
 
 

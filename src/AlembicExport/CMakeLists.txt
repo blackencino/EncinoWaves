@@ -1,0 +1,11 @@
+encino_waves_define_executable(waves_alembic_export
+    SOURCES
+        main.cpp
+    DEPENDENCIES
+        encino_waves::waves
+        encino_waves::util
+        Alembic::Alembic
+        OpenEXR::OpenEXR
+        Boost::Boost
+        fmt::fmt
+    )

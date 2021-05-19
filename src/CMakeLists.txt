@@ -14,17 +14,12 @@
 ## limitations under the License.
 ##-*****************************************************************************
 
-# Create a container project for all the src
-PROJECT( EWAV_SRC )
-
-# Include the source dirs to make the src root dir an include
-INCLUDE_DIRECTORIES( ${EWAV_SRC_SOURCE_DIR} )
-
 # Recurse into all the subdirectories
-ADD_SUBDIRECTORY( Util )
-ADD_SUBDIRECTORY( GeepGLFW )
-ADD_SUBDIRECTORY( SimpleSimViewer )
-ADD_SUBDIRECTORY( EncinoWaves )
+add_subdirectory( Util )
+#ADD_SUBDIRECTORY( GeepGLFW )
+#ADD_SUBDIRECTORY( SimpleSimViewer )
+add_subdirectory( EncinoWaves )
+add_subdirectory( AlembicExport )
 
 
 
