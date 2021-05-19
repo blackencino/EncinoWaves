@@ -61,7 +61,8 @@ int main(int argc, char* argv[]) {
     int filter = 0;
     int random = 0;
     int num_frames = 100;
-    std::string out_file_base;
+    std::string out_file_name = "encino_waves.abc";
+    double frames_per_second = 24.0;
 
     po::options_description desc("Encino Waves Alembic Export 2021");
     desc.add_options()
@@ -210,9 +211,15 @@ int main(int argc, char* argv[]) {
       ->default_value( num_frames ),
       "Num Frames" )
 
-    ( "out_file_base",
-       po::value<std::string>(),
-       "The output file name base" )
+    ( "frames_per_second",
+      po::value<double>( &frames_per_second )
+      ->default_value( frames_per_second ),
+      "Frames per second" )
+
+    ( "out_file_name",
+       po::value<std::string>(&out_file_name)
+       ->default_value(out_file_name),
+       "The output file name" )
     ;
 
     // clang-format on
@@ -228,10 +235,6 @@ int main(int argc, char* argv[]) {
     }
 
     if (vm.count("filterInvert")) { params.filter.invert = true; }
-
-    if (vm.count("out_file_base")) {
-        out_file_base = vm["out_file_base"].as<std::string>();
-    }
 
     params.dispersion.type =
       static_cast<EncinoWaves::DispersionType>(dispersion);
@@ -270,120 +273,131 @@ int main(int argc, char* argv[]) {
     V3f originXYZ(-0.5f * params.domain, -0.5f * params.domain, 0.0f);
     V3f sizeXYZ(params.domain, params.domain, 0.0f);
 
-    for (int frame = 1; frame <= num_frames; ++frame) {
-        counts.clear();
-        auto const wave_time = 24.0 * static_cast<double>(frame);
+    // Do indices. (TRIANGLES NOW)
+    int index = 0;
+    for (int j = 0; j < N; ++j) {
+        for (int i = 0; i < N; ++i, index += 6) {
+            counts.push_back(3);
+            counts.push_back(3);
 
-        // Init propagated state.
-        wavesPropagation->propagate(
-          params, *wavesInitialState, *wavesPropagatedState, wave_time);
-        std::cout << "Propagated to frame" << frame << std::endl;
+            // First triangle.
+            indices[index] = wrap(i + 1, N + 1) + (N + 1) * wrap(j, N + 1);
+            indices[index + 1] = wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
+            indices[index + 2] =
+              wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
 
-        //   vec4 vtx = vec4(
-        //            ( g_vertex.x - g_pinch * g_dx ),
-        //            ( g_vertex.y - g_pinch * g_dy ),
-        //            ( g_amplitude * g_h ),
-        //            1 );
-
-        // Compute normals.
-        EncinoWaves::ComputeNormals<float>(
-          params, *wavesPropagatedState, normals.data());
-        std::cout << "Computed normals." << std::endl;
-
-        // Gather stats.
-        auto wavesStats = std::make_unique<EncinoWaves::Statsf>(
-          wavesPropagatedState->Height, wavesPropagatedState->MinE);
-        std::cout << "Gathered stats." << std::endl;
-
-        //-*************************************************************************
-        // STATIC ARRAY COMPUTATION
-        //-*************************************************************************
-        // Make an XY array for vertices to match sim data.
-
-        // Fill with the correct size.
-        auto const* heights = wavesPropagatedState->Height.cdata();
-        auto const* dxs = wavesPropagatedState->Dx.cdata();
-        auto const* dys = wavesPropagatedState->Dy.cdata();
-        std::size_t index = 0;
-        for (int j = 0; j < N + 1; ++j) {
-            float fj = float(j) / float(N);
-
-            for (int i = 0; i < N + 1; ++i, ++index) {
-                float fi = float(i) / float(N);
-
-                verts[index] = originXYZ + (sizeXYZ * V3f(fi, fj, 0.0f)) +
-                               V3f{-params.pinch * dxs[index],
-                                   -params.pinch * dys[index],
-                                   params.amplitudeGain * heights[index]};
-            }
+            // Second triangle.
+            indices[index + 3] = wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
+            indices[index + 4] = wrap(i, N + 1) + (N + 1) * wrap(j + 1, N + 1);
+            indices[index + 5] =
+              wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
         }
+    }
 
-        // Do indices. (TRIANGLES NOW)
-        index = 0;
-        for (int j = 0; j < N; ++j) {
-            for (int i = 0; i < N; ++i, index += 6) {
-                counts.push_back(3);
-                counts.push_back(3);
+    // Scope for alembic archive
+    {
+        using namespace Alembic::AbcGeom;
 
-                // First triangle.
-                indices[index] = wrap(i + 1, N + 1) + (N + 1) * wrap(j, N + 1);
-                indices[index + 1] = wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
-                indices[index + 2] =
-                  wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
+        OArchive archive{Alembic::AbcCoreOgawa::WriteArchive(),
+                         out_file_name.c_str()};
 
-                // Second triangle.
-                indices[index + 3] = wrap(i, N + 1) + (N + 1) * wrap(j, N + 1);
-                indices[index + 4] =
-                  wrap(i, N + 1) + (N + 1) * wrap(j + 1, N + 1);
-                indices[index + 5] =
-                  wrap(i + 1, N + 1) + (N + 1) * wrap(j + 1, N + 1);
+        Int32ArraySample indices_array_sample{
+          reinterpret_cast<int32_t const*>(indices.data()), indices.size()};
+
+        Int32ArraySample counts_array_sample{
+          reinterpret_cast<int32_t const*>(counts.data()), counts.size()};
+
+        P3fArraySample points_array_sample{
+          reinterpret_cast<Alembic::Abc::V3f const*>(verts.data()),
+          verts.size()};
+
+        ON3fGeomParam::Sample normals_geom_sample{
+          N3fArraySample{
+            reinterpret_cast<Alembic::Abc::V3f const*>(normals.data()),
+            normals.size()},
+          kVertexScope};
+
+        OV2fGeomParam::Sample uvs_geom_sample{};
+
+        OPolyMeshSchema::Sample mesh_sample{points_array_sample,
+                                            indices_array_sample,
+                                            counts_array_sample,
+                                            uvs_geom_sample,
+                                            normals_geom_sample};
+
+        auto const dt = static_cast<chrono_t>(1.0 / frames_per_second);
+        TimeSampling time_sampling{dt, dt};
+        auto const time_sampling_index = archive.addTimeSampling(time_sampling);
+
+        OObject top_object{archive, kTop};
+
+        OPolyMesh mesh_object{top_object, "fluid_mesh"};
+        auto& mesh = mesh_object.getSchema();
+        mesh.setTimeSampling(time_sampling_index);
+
+        for (int frame = 1; frame <= num_frames; ++frame) {
+            auto const wave_time =
+              static_cast<double>(frame) / frames_per_second;
+
+            // Init propagated state.
+            wavesPropagation->propagate(
+              params, *wavesInitialState, *wavesPropagatedState, wave_time);
+            std::cout << "Propagated to frame" << frame << std::endl;
+
+            // Compute normals.
+            EncinoWaves::ComputeNormals<float>(
+              params, *wavesPropagatedState, normals.data());
+            std::cout << "Computed normals." << std::endl;
+
+            // Gather stats.
+            auto wavesStats = std::make_unique<EncinoWaves::Statsf>(
+              wavesPropagatedState->Height, wavesPropagatedState->MinE);
+            std::cout << "Gathered stats." << std::endl;
+
+            //-*************************************************************************
+            // STATIC ARRAY COMPUTATION
+            //-*************************************************************************
+            // Make an XY array for vertices to match sim data.
+
+            // Fill with the correct size.
+            auto const* heights = wavesPropagatedState->Height.cdata();
+            auto const* dxs = wavesPropagatedState->Dx.cdata();
+            auto const* dys = wavesPropagatedState->Dy.cdata();
+            std::size_t index = 0;
+            for (int j = 0; j < N + 1; ++j) {
+                float fj = float(j) / float(N);
+
+                for (int i = 0; i < N + 1; ++i, ++index) {
+                    float fi = float(i) / float(N);
+
+                    verts[index] = originXYZ + (sizeXYZ * V3f(fi, fj, 0.0f)) +
+                                   V3f{-params.pinch * dxs[index],
+                                       -params.pinch * dys[index],
+                                       params.amplitudeGain * heights[index]};
+                }
             }
-        }
 
-        // Namespace scope
-        if (out_file_base != "") {
-            auto const filename =
-              fmt::format("{}.{:04}.abc", out_file_base, frame);
-
-            using namespace Alembic::AbcGeom;
-
-            P3fArraySample points_array_sample{
+            points_array_sample = P3fArraySample{
               reinterpret_cast<Alembic::Abc::V3f const*>(verts.data()),
               verts.size()};
 
-            Int32ArraySample indices_array_sample{
-              reinterpret_cast<int32_t const*>(indices.data()), indices.size()};
-
-            Int32ArraySample counts_array_sample{
-              reinterpret_cast<int32_t const*>(counts.data()), counts.size()};
-
-            ON3fGeomParam::Sample normals_geom_sample{
+            normals_geom_sample = ON3fGeomParam::Sample{
               N3fArraySample{
                 reinterpret_cast<Alembic::Abc::V3f const*>(normals.data()),
                 normals.size()},
               kVertexScope};
 
-            OV2fGeomParam::Sample uvs_geom_sample{};
-
-            OPolyMeshSchema::Sample mesh_sample{points_array_sample,
-                                                indices_array_sample,
-                                                counts_array_sample,
-                                                uvs_geom_sample,
-                                                normals_geom_sample};
-
-            OArchive archive{Alembic::AbcCoreOgawa::WriteArchive(),
-                             filename.c_str()};
-
-            OObject top_object{archive, kTop};
-
-            OPolyMesh mesh_object{top_object, "fluid_mesh"};
-            auto& mesh = mesh_object.getSchema();
+            mesh_sample.setPositions(points_array_sample);
+            mesh_sample.setNormals(normals_geom_sample);
 
             mesh.set(mesh_sample);
+
+            std::cout << "Done frame: " << frame << std::endl;
         }
 
-        std::cout << "Done frame: " << frame << std::endl;
-    }
+    }  // End of alembic scope
+
+    std::cout << "Alembic file: " << out_file_name << " written." << std::endl;
 
     return 0;
 }
