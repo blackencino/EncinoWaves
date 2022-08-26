@@ -186,12 +186,7 @@ void Downsample(const RealSpatialField2D<T>& i_src,
   }
 
   // Fill in the repeated border.
-  {
-    CopyWrappedBorder<T> F;
-    F.Data = o_dst.data();
-    F.N = o_dst.unpaddedWidth();
-    tbb::parallel_for(tbb::blocked_range<int>{0, (int)o_dst.height()}, F);
-  }
+  CopyWrappedBorder(o_dst);
 }
 
 //-*****************************************************************************
