@@ -313,26 +313,34 @@ protected:
 };
 
 //-*****************************************************************************
-template <typename T>
-struct CopyWrappedBorder {
-  T* Data;
-  int N;
 
-  void operator()(const tbb::blocked_range<int>& i_rows) const {
-    std::size_t stride = N + 1;
-    for (int y = i_rows.begin(); y != i_rows.end(); ++y) {
-      if (y == N) {
-        std::copy(Data,                             // input begin
-                  Data + stride,                    // input end
-                  Data + (stride * std::size_t(N))  // output begin
-                  );
-      } else {
-        std::size_t rowBeginIndex = y * stride;
-        Data[rowBeginIndex + N]   = Data[rowBeginIndex];
-      }
-    }
-  }
-};
+template <typename T>
+void CopyWrappedBorder(RealSpatialField2D<T> &o_spatial) {
+  EWAV_ASSERT(o_spatial.padding() == 1,
+              "Spatial field must be padded");
+
+  T *data = o_spatial.data();
+  const int stride = o_spatial.width();
+
+  // Pad all rows except the last one.
+  // Can be done in parallel, no data dependencies.
+  tbb::parallel_for(tbb::blocked_range<int>(0, o_spatial.unpaddedHeight()),
+                    [&](const auto &r)
+                    {
+                      for (int y = r.begin(); y != r.end(); ++y)
+                      {
+                        const int r0 = y * stride;
+                        data[r0 + stride - 1] = data[r0];
+                      }
+                    });
+
+  // Set last row same as first row. We must do this separately *after* we
+  // know that the bottom row has been padded! There is a data dependency on
+  // the first row.
+  std::copy(data,                               // input begin
+            data + stride,                      // input end
+            data + (stride * o_spatial.unpaddedHeight())); // output begin
+}
 
 //-*****************************************************************************
 template <typename T>
@@ -385,12 +393,7 @@ public:
     FFT::execute_dft_c2r(m_plan, i_spectral.data(), o_spatial.data());
 
     // Fill in the repeated border.
-    {
-      CopyWrappedBorder<T> F;
-      F.Data = o_spatial.data();
-      F.N = m_widthHeight;
-      tbb::parallel_for(tbb::blocked_range<int>(0, m_widthHeight + 1), F);
-    }
+    CopyWrappedBorder(o_spatial);
   }
 
 protected:
