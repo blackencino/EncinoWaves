@@ -76,8 +76,9 @@ T normalizedSwellDirectionalProduct(T theta, FUNCA A, FUNCB B) {
 
 //------------------------------------------------------------------------------
 template <typename T>
-T modalAngularFrequencyJONSWAP(T gravity, T meanWindSpeed, T fetchLength) {
-  T dimensionlessFetch = gravity * fetchLength / sqr(meanWindSpeed);
+T modalAngularFrequencyJONSWAP(T gravity, T meanWindSpeed, T fetch_km) {
+  const T fetch_m = 1000 * fetch_km;
+  T dimensionlessFetch = gravity * fetch_m / sqr(meanWindSpeed);
   return TAU<T> * 3.5 * (gravity / meanWindSpeed) *
          std::pow(dimensionlessFetch, -0.33);
 }
