@@ -1,5 +1,5 @@
 //-*****************************************************************************
-// Copyright 2015 Christopher Jon Horvath
+// Copyright 2015-2025 Christopher Jon Horvath
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,138 +35,146 @@
 #ifndef _EncinoWaves_Parameters_h_
 #define _EncinoWaves_Parameters_h_
 
-#include "Foundation.h"
 #include "Basics.h"
+#include "Foundation.h"
 
 namespace EncinoWaves {
 
 enum DispersionType {
-  kDeepDispersion,
-  kFiniteDepthDispersion,
-  kCapillaryDispersion
+    kDeepDispersion,
+    kFiniteDepthDispersion,
+    kCapillaryDispersion
 };
 
 enum SpectrumType {
-  kPiersonMoskowitzSpectrum,
-  kJONSWAPSpectrum,
-  kTMASpectrum,
+    kPiersonMoskowitzSpectrum,
+    kJONSWAPSpectrum,
+    kTMASpectrum,
 
-  kNumSpectrumTypes
+    kNumSpectrumTypes
 };
 
 enum DirectionalSpreadingType {
-  kPosCosThetaSqrDirectionalSpreading,
-  kMitsuyasuDirectionalSpreading,
-  kHasselmannDirectionalSpreading,
-  kDonelanBannerDirectionalSpreading,
+    kPosCosThetaSqrDirectionalSpreading,
+    kMitsuyasuDirectionalSpreading,
+    kHasselmannDirectionalSpreading,
+    kDonelanBannerDirectionalSpreading,
 };
 
 enum FilterType {
-  kNullFilter,
-  kSmoothInvertibleBandPassFilter,
+    kNullFilter,
+    kSmoothInvertibleBandPassFilter,
 };
 
 enum RandomType {
-  kNormalRandom,
-  kLogNormalRandom,
+    kNormalRandom,
+    kLogNormalRandom,
 };
 
 template <typename T>
 struct Parameters {
-  // Resolution of the waves.
-  int resolutionPowerOfTwo;
+    // Resolution of the waves.
+    int resolutionPowerOfTwo;
 
-  // Domain of the waves. - this is the size of the world space
-  // that they occupy.
-  T domain;  // in meters
+    // Domain of the waves. - this is the size of the world space
+    // that they occupy.
+    T domain;  // in meters
 
-  // Some physical parameters.
-  T gravity;         // in meters per second squared.
-  T surfaceTension;  // in Newtons per meter
-  T density;         // in kilograms per meter cubed
-  T depth;           // in meters.
+    // Some physical parameters.
+    T gravity;         // in meters per second squared.
+    T surfaceTension;  // in Newtons per meter
+    T density;         // in kilograms per meter cubed
+    T depth;           // in meters.
 
-  // Wind stuff. It is assumed that wind travels along the positive
-  // X axis, since we assume these fields can be externally transformed.
-  // Wind speed is in meters per second.
-  T windSpeed;  // in meters per second
-  T fetch;      // in KILOMETERS
+    // Wind stuff. It is assumed that wind travels along the positive
+    // X axis, since we assume these fields can be externally transformed.
+    // Wind speed is in meters per second.
+    T windSpeed;  // in meters per second
+    T fetch;      // in KILOMETERS
 
-  T pinch;          // lateral displacement
-  T amplitudeGain;  // vertical displacement
+    T pinch;          // lateral displacement
+    T amplitudeGain;  // vertical displacement
 
-  T troughDamping;
-  T troughDampingSmallWavelength;
-  T troughDampingBigWavelength;
-  T troughDampingSoftWidth;
+    T troughDamping;
+    T troughDampingSmallWavelength;
+    T troughDampingBigWavelength;
+    T troughDampingSoftWidth;
 
-  // Dispersion Stuff - Deep, FiniteDepth, Capillary
-  struct Dispersion {
-    DispersionType type;
-    Dispersion()
-      : type(kCapillaryDispersion) {}
-  } dispersion;
+    // Dispersion Stuff - Deep, FiniteDepth, Capillary
+    struct Dispersion {
+        DispersionType type;
+        Dispersion()
+          : type(kCapillaryDispersion) {
+        }
+    } dispersion;
 
-  // Spectrum Stuff - Phillips, Pierson-Moskowitz, JONSWAP, TMA
-  struct Spectrum {
-    SpectrumType type;
-    Spectrum()
-      : type(kTMASpectrum) {}
-  } spectrum;
+    // Spectrum Stuff - Phillips, Pierson-Moskowitz, JONSWAP, TMA
+    struct Spectrum {
+        SpectrumType type;
+        Spectrum()
+          : type(kTMASpectrum) {
+        }
+    } spectrum;
 
-  // Directional Spreading Stuff
-  struct DirectionalSpreading {
-    DirectionalSpreadingType type;
-    T swell;
-    DirectionalSpreading()
-      : type(kHasselmannDirectionalSpreading)
-      , swell(0.0) {}
-  } directionalSpreading;
+    // Directional Spreading Stuff
+    struct DirectionalSpreading {
+        DirectionalSpreadingType type;
+        T swell;
+        DirectionalSpreading()
+          : type(kHasselmannDirectionalSpreading)
+          , swell(0.0) {
+        }
+    } directionalSpreading;
 
-  // Filter
-  struct Filter {
-    FilterType type;
-    T softWidth;
-    T smallWavelength;
-    T bigWavelength;
-    T min;
-    bool invert;
-    Filter()
-      : type(kNullFilter)
-      , softWidth(0.0)
-      , smallWavelength(0.0)
-      , bigWavelength(1000000.0)
-      , min(0.0)
-      , invert(false) {}
-  } filter;
+    // Filter
+    struct Filter {
+        FilterType type;
+        T softWidth;
+        T smallWavelength;
+        T bigWavelength;
+        T min;
+        bool invert;
+        Filter()
+          : type(kNullFilter)
+          , softWidth(0.0)
+          , smallWavelength(0.0)
+          , bigWavelength(1000000.0)
+          , min(0.0)
+          , invert(false) {
+        }
+    } filter;
 
-  // Random Stuff
-  struct Random {
-    RandomType type;
-    int seed;
-    Random()
-      : type(kNormalRandom)
-      , seed(54321) {}
-  } random;
+    // Random Stuff
+    struct Random {
+        RandomType type;
+        int seed;
+        Random()
+          : type(kNormalRandom)
+          , seed(54321) {
+        }
+    } random;
 
-  // Constructor
-  Parameters()
-    : resolutionPowerOfTwo(9)
-    , domain(100.0)
-    , gravity(9.81)
-    , surfaceTension(0.074)
-    , density(1000.0)
-    , depth(100.0)
-    , windSpeed(17.0)
-    , fetch(300.0)
-    , pinch(0.75)
-    , amplitudeGain(1.0)
-    , troughDamping(0.0)
-    , troughDampingSmallWavelength(1.0)
-    , troughDampingBigWavelength(4.0)
-    , troughDampingSoftWidth(2.0) {}
+    // Constructor
+    Parameters()
+      : resolutionPowerOfTwo(9)
+      , domain(100.0)
+      , gravity(9.81)
+      , surfaceTension(0.074)
+      , density(1000.0)
+      , depth(100.0)
+      , windSpeed(17.0)
+      , fetch(300.0)
+      , pinch(0.75)
+      , amplitudeGain(1.0)
+      , troughDamping(0.0)
+      , troughDampingSmallWavelength(1.0)
+      , troughDampingBigWavelength(4.0)
+      , troughDampingSoftWidth(2.0) {
+    }
 
-  int resolution() const { return 1 << resolutionPowerOfTwo; }
+    int resolution() const {
+        return 1 << resolutionPowerOfTwo;
+    }
 };
 
 //-*****************************************************************************

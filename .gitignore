@@ -1,0 +1,15 @@
+simplified_debug/output/*
+simplified_debug/cpp_ground_truth/output/*
+simplified_debug/cpp_ground_truth/height_generator
+
+.polyscope.ini
+imgui.ini
+*.so
+*.dylib
+*.dll
+__pycache__/
+*.pyc 
+
+simplified_debug/cpp_ground_truth/build/*
+build/*
+

@@ -23,7 +23,7 @@ This library is written as a working implementation of the paper:
 
 ### License 
 
-Copyright &copy; 2015 Christopher Jon Horvath
+Copyright &copy; 2015-2025 Christopher Jon Horvath
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
