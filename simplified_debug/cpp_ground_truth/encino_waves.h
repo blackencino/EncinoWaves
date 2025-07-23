@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#pragma once
+
+#ifndef ENCINO_WAVES_H_INCLUDED
+#define ENCINO_WAVES_H_INCLUDED
+
 #include <cstdint.h>
 #include <math.h>
 
@@ -972,3 +977,5 @@ int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
 //         return it->second;
 //     }
 // }
+
+#endif  // ENCINO_WAVES_H_INCLUDED
