@@ -27,8 +27,9 @@ import platform
 import os
 import math
 from dataclasses import dataclass, field, replace
-from typing import Optional, Tuple, NamedTuple
 from enum import IntEnum
+
+from cupy_encino_waves import encino_waves_spectral_basis_cupy
 
 
 # --- Library Loading ---
@@ -314,7 +315,7 @@ class OceanParameters:
         """Return new parameters with updated domain."""
         return replace(self, domain=domain)
 
-    def with_wind(self, wind_speed: float, fetch_km: Optional[float] = None) -> 'OceanParameters':
+    def with_wind(self, wind_speed: float, fetch_km: float | None = None) -> 'OceanParameters':
         """Return new parameters with updated wind conditions."""
         kwargs = {'wind_speed': wind_speed}
         if fetch_km is not None:
@@ -351,77 +352,73 @@ class OceanPlan:
     
     @property
     def N(self) -> int:
-        """Grid resolution."""
         return self._c_struct.N
     
     @property 
     def size_i(self) -> int:
-        """Size in i direction (for spectral arrays)."""
         return self._c_struct.size_i
         
     @property
     def size_j(self) -> int:
-        """Size in j direction (for spectral arrays)."""
         return self._c_struct.size_j
         
     @property
     def count(self) -> int:
-        """Total number of spectral elements."""
         return self._c_struct.count
     
     @property
     def dk(self) -> float:
-        """Wave number spacing."""
         return self._c_struct.dk
     
     @property
     def max_k_mag(self) -> float:
-        """Maximum wave number magnitude."""
         return self._c_struct.max_k_mag
     
     @property
     def gravity(self) -> float:
-        """Gravitational acceleration."""
         return self._c_struct.gravity
     
     @property
     def sigma_over_rho(self) -> float:
-        """Surface tension over density."""
         return self._c_struct.sigma_over_rho
     
     @property
     def depth(self) -> float:
-        """Ocean depth."""
         return self._c_struct.depth
     
     @property
     def wind_speed(self) -> float:
-        """Wind speed."""
         return self._c_struct.wind_speed
+    @property
+    def fetch_m(self) -> float:
+        return self._c_struct.fetch_m
     
     @property
-    def swell(self) -> float:
-        """Swell directionality."""
-        return self._c_struct.swell
-    
-    @property
-    def peak_omega(self) -> float:
-        """Peak omega."""
-        return self._c_struct.peak_omega
-    
-    @property
-    def TMA_alpha(self) -> float:
-        """TMA alpha parameter."""
+    def tma_alpha(self) -> float:
         return self._c_struct.tma_alpha
     
     @property
-    def TMA_gamma(self) -> float:
-        """TMA gamma parameter."""
+    def tma_gamma(self) -> float:
         return self._c_struct.tma_gamma
+
+    @property
+    def tma_kd_gain(self) -> float:
+        return self._c_struct.tma_kd_gain
+
+    @property
+    def peak_omega(self) -> float:
+        return self._c_struct.peak_omega
+
+    @property
+    def wind_speed_over_celerity(self) -> float:
+        return self._c_struct.wind_speed_over_celerity
+
+    @property
+    def swell(self) -> float:
+        return self._c_struct.swell
     
     @property
     def random_seed(self) -> int:
-        """Random seed."""
         return self._c_struct.random_seed
     
     def _get_c_struct_pointer(self) -> ctypes.POINTER(_OceanPlanStruct):
@@ -431,7 +428,7 @@ class OceanPlan:
 
 # --- Pure Functions ---
 
-def create_ocean_plan(params: Optional[OceanParameters] = None) -> OceanPlan:
+def create_ocean_plan(params: OceanParameters | None = None) -> OceanPlan:
     """
     Create an ocean simulation plan from parameters.
     
@@ -460,8 +457,9 @@ def create_ocean_plan(params: Optional[OceanParameters] = None) -> OceanPlan:
 
 
 def compute_spectral_basis(plan: OceanPlan,
-                          out: Optional[np.ndarray] = None,
-                          max_threads: int = 1) -> np.ndarray:
+                          out: np.ndarray | None = None,
+                          max_threads: int = 1,
+                          use_cupy: bool = False) -> np.ndarray:
     """
     Compute the spectral basis for wave generation.
     
@@ -484,18 +482,21 @@ def compute_spectral_basis(plan: OceanPlan,
         out = np.zeros(expected_shape, dtype=np.float32)
     else:
         _validate_array(out, expected_shape, np.float32, "output")
-    
-    # Prepare for C call
-    shape_array = (ctypes.c_int * 3)(*expected_shape)
-    
-    result = LIB.encino_waves_spectral_basis_omp(
-        plan._get_c_struct_pointer(),
-        max_threads,
-        3,  # rank
-        shape_array,
-        out.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-    )
-    check_error(result, "spectral_basis_omp")
+
+    if use_cupy:
+        return encino_waves_spectral_basis_cupy(plan, out=out)
+    else:
+        # Prepare for C call
+        shape_array = (ctypes.c_int * 3)(*expected_shape)
+        
+        result = LIB.encino_waves_spectral_basis_omp(
+            plan._get_c_struct_pointer(),
+            max_threads,
+            3,  # rank
+            shape_array,
+            out.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        )
+        check_error(result, "spectral_basis_omp")
     
     return out
 
@@ -731,7 +732,7 @@ def _torch_encino_waves_spectral_basis_kernel(
 
 
 def compute_spectral_basis_torch(plan: OceanPlan,
-                          out: Optional[np.ndarray] = None,
+                          out: np.ndarray | None = None,
                           device: torch.device = torch.device('cpu')) -> np.ndarray:
     out_tensor = _torch_encino_waves_spectral_basis_kernel(plan.dk,
         plan.N,
@@ -757,7 +758,7 @@ def compute_spectral_basis_torch(plan: OceanPlan,
 def compute_spectral_height(plan: OceanPlan,
                            time: float,
                            spectral_basis: np.ndarray,
-                           out: Optional[np.ndarray] = None,
+                           out: np.ndarray | None = None,
                            max_threads: int = 1) -> np.ndarray:
     """
     Compute wave heights from spectral basis at a given time.
@@ -812,7 +813,7 @@ def compute_spectral_height(plan: OceanPlan,
 
 def compute_spatial_heights(plan: OceanPlan,
                            spectral_height: np.ndarray,
-                           out: Optional[np.ndarray] = None) -> np.ndarray:
+                           out: np.ndarray | None = None) -> np.ndarray:
     """
     Convert spectral height data to spatial height field using inverse FFT.
     
@@ -879,7 +880,7 @@ def compute_spatial_heights(plan: OceanPlan,
 
 def compute_spatial_heights_fftw(plan: OceanPlan,
                                 spectral_height: np.ndarray,
-                                out: Optional[np.ndarray] = None) -> np.ndarray:
+                                out: np.ndarray | None = None) -> np.ndarray:
     """
     Convert spectral height data to spatial height field using FFTW.
     
@@ -965,7 +966,7 @@ def compute_spatial_heights_fftw(plan: OceanPlan,
 # --- Helper Functions ---
 
 def _validate_array(arr: np.ndarray, 
-                   expected_shape: Tuple[int, ...], 
+                   expected_shape: tuple[int, ...], 
                    expected_dtype: np.dtype,
                    name: str) -> None:
     """Validate numpy array properties."""
@@ -977,7 +978,7 @@ def _validate_array(arr: np.ndarray,
         raise ValueError(f"{name} must be C-contiguous")
 
 
-def _prepare_complex_array_for_c(arr: np.ndarray) -> Tuple[np.ndarray, bool]:
+def _prepare_complex_array_for_c(arr: np.ndarray) -> tuple[np.ndarray, bool]:
     """
     Prepare array for C library call, handling both complex64 and float32 formats.
     
@@ -1053,9 +1054,9 @@ def create_default_ocean_plan() -> OceanPlan:
 
 def simulate_ocean_surface(params: OceanParameters,
                           time: float,
-                          spectral_basis_out: Optional[np.ndarray] = None,
-                          spectral_height_out: Optional[np.ndarray] = None,
-                          spatial_heights_out: Optional[np.ndarray] = None) -> Tuple[OceanPlan, np.ndarray, np.ndarray, np.ndarray]:
+                          spectral_basis_out: np.ndarray | None = None,
+                          spectral_height_out: np.ndarray | None = None,
+                          spatial_heights_out: np.ndarray | None = None) -> tuple[OceanPlan, np.ndarray, np.ndarray, np.ndarray]:
     """
     Complete ocean simulation pipeline including spatial height computation.
     

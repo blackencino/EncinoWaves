@@ -159,7 +159,7 @@ def recreate_ocean_state():
     
     # Create new ocean plan and spectral basis using functional interface
     current_ocean_plan = create_ocean_plan(ocean_params)
-    current_spectral_basis = compute_spectral_basis(current_ocean_plan)
+    current_spectral_basis = compute_spectral_basis(current_ocean_plan, use_cupy=True)
     
     # Prepare output arrays for spatial heights (all methods)
     array_shape = (current_ocean_plan.N, current_ocean_plan.N)

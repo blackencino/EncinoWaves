@@ -22,6 +22,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Find OpenMP for parallel sections
 find_package(OpenMP REQUIRED)
 
+# Get CONDA_PREFIX from environment
+if(DEFINED ENV{CONDA_PREFIX})
+    set(CONDA_PREFIX $ENV{CONDA_PREFIX})
+    message(STATUS "Using CONDA_PREFIX: ${CONDA_PREFIX}")
+    
+    # Add conda include and library directories
+    include_directories(${CONDA_PREFIX}/include)
+    link_directories(${CONDA_PREFIX}/lib)
+else()
+    message(WARNING "CONDA_PREFIX not set - FFTW3 may not be found correctly")
+endif()
+
 # Define the shared library target
 add_library(encino_waves SHARED generator.cpp)
 

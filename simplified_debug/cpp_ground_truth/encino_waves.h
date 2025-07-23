@@ -341,6 +341,17 @@ inline ENCINO_WAVES_HOSTDEV float float_01_from_word(uint64_t const word) {
     return d < 0.0 ? 0.0f : d > 1.0 ? 1.0f : ((float)(d));
 }
 
+inline ENCINO_WAVES_HOSTDEV uint32_t wave_number_to_seed_offset(float k) {
+    k = roundf(k * 10000.0f);
+#ifdef __CUDA_ARCH__
+    return __float_as_uint(k);
+#else
+    uint32_t k_uint;
+    memcpy(&k_uint, &k, sizeof(uint32_t));
+    return k_uint;
+#endif
+}
+
 inline ENCINO_WAVES_HOSTDEV uint64_t hash_state(uint64_t const state) {
     uint32_t s = ((uint32_t)(state));
     s = (s * 747796405U) + 2891336453U;
@@ -570,8 +581,8 @@ void encino_waves_classic_spectral_basis_at_k(
     uint64_t variate_3;
     {
         uint64_t state = hash_state(plan->random_seed);
-        state = hash_state(((uint32_t)(state)) + ((uint32_t)(kj * 10000.0f)));
-        state = hash_state(((uint32_t)(state)) + ((uint32_t)(ki * 10000.0f)));
+        state = hash_state(((uint32_t)(state)) + wave_number_to_seed_offset(kj));
+        state = hash_state(((uint32_t)(state)) + wave_number_to_seed_offset(ki));
 
         variate_0 = word_from_state(state);
         state = hash_state(state);
