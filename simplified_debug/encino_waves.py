@@ -568,8 +568,8 @@ def compute_spatial_heights(plan: OceanPlan,
     # Perform inverse FFT to get spatial heights
     # irfft2 expects the input to be the result of rfft2, which has shape (N, N//2+1)
     # The spectral_height should already be in this format from the C library
-    # Use norm=None (no normalization) - this is standard for Tessendorf wave simulations
-    spatial_heights = np.fft.irfft2(complex_data, s=(plan.N, plan.N), norm=None)
+    # Use norm="forward" to match FFTW behavior (no backward scaling)
+    spatial_heights = np.fft.irfft2(complex_data, s=(plan.N, plan.N), norm="forward")
     
     # Copy result to output array (with type conversion if needed)
     out[:] = spatial_heights.astype(np.float32)

@@ -13,6 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Encino Waves Visualization using Polyscope
+
+Interactive visualization of ocean wave simulation with real-time parameter adjustment.
+Features:
+- Real-time ocean parameter tweaking 
+- Wave animation with time control
+- Visualization scaling for better wave visibility
+- Z-up coordinate system for proper wave display
+- FFT method comparison (FFTW vs numpy) with difference visualization
+"""
+
 import numpy as np
 import polyscope as ps
 from dataclasses import replace
@@ -23,7 +35,9 @@ from encino_waves import (
     create_ocean_plan, 
     compute_spectral_basis,
     compute_spectral_height, 
-    compute_spatial_heights_fftw
+    compute_spatial_heights_fftw,
+    compute_spatial_heights,
+    _HAS_FFTW
 )
 
 # --- Global State Management ---
@@ -55,6 +69,13 @@ current_time = 0.0
 # Visualization scaling factor to make waves more visible
 wave_scale_factor = 100.0
 
+# Comparison mode settings
+use_fftw = True  # True = FFTW, False = numpy
+show_difference = False  # Show difference between FFTW and numpy
+height_field_fftw = None  # Cache FFTW results for comparison
+height_field_numpy = None  # Cache numpy results for comparison
+comparison_stats = {"max_diff": 0.0, "mean_diff": 0.0, "rmse_diff": 0.0}
+
 def create_mesh_geometry():
     """Create the mesh geometry (faces and initial vertices). Only called when resolution changes."""
     global ps_mesh
@@ -74,34 +95,77 @@ def create_mesh_geometry():
 
 def update_vertices():
     """Update mesh vertices with current height data. Called for any parameter change."""
-    global ps_mesh, height_field_data
+    global ps_mesh, height_field_data, height_field_fftw, height_field_numpy, comparison_stats
     
-    # Compute the wave heights using the functional interface with FFTW
+    # Compute spectral height once for both methods
     spectral_height = compute_spectral_height(current_ocean_plan, current_time, current_spectral_basis)
-    height_field_data = compute_spatial_heights_fftw(current_ocean_plan, spectral_height, out=height_field_data)
+    
+    # Compute heights with both methods if in comparison mode or if we need the specific method
+    if show_difference or use_fftw:
+        if _HAS_FFTW:
+            height_field_fftw = compute_spatial_heights_fftw(current_ocean_plan, spectral_height, out=height_field_fftw)
+        else:
+            print("Warning: FFTW not available, using numpy instead")
+            height_field_fftw = compute_spatial_heights(current_ocean_plan, spectral_height, out=height_field_fftw)
+    
+    if show_difference or not use_fftw:
+        height_field_numpy = compute_spatial_heights(current_ocean_plan, spectral_height, out=height_field_numpy)
+    
+    # Choose which height field to display
+    if show_difference and _HAS_FFTW:
+        # Show the difference between FFTW and numpy
+        difference = height_field_fftw - height_field_numpy
+        height_field_data = difference
+        
+        # Update comparison statistics
+        comparison_stats["max_diff"] = float(np.max(np.abs(difference)))
+        comparison_stats["mean_diff"] = float(np.mean(np.abs(difference))) 
+        comparison_stats["rmse_diff"] = float(np.sqrt(np.mean(difference**2)))
+        
+        scalar_name = "difference (FFTW - numpy)"
+        colormap = 'coolwarm'  # Good for showing positive/negative differences
+    else:
+        # Show the selected method
+        if use_fftw and _HAS_FFTW:
+            height_field_data = height_field_fftw
+            scalar_name = "height (FFTW)"
+        else:
+            height_field_data = height_field_numpy
+            scalar_name = "height (numpy)"
+        colormap = 'viridis'
     
     N = current_ocean_plan.N
     xx, yy = np.meshgrid(
         np.linspace(-ocean_params.domain/2, ocean_params.domain/2, N), 
         np.linspace(-ocean_params.domain/2, ocean_params.domain/2, N)
     )
+    
     # Scale the height field for better visualization and add Z_OFFSET
-    scaled_heights = height_field_data * wave_scale_factor + Z_OFFSET
+    if show_difference:
+        # For differences, use a smaller scale factor and center around Z_OFFSET
+        scaled_heights = height_field_data * wave_scale_factor * 10.0 + Z_OFFSET
+    else:
+        scaled_heights = height_field_data * wave_scale_factor + Z_OFFSET
+    
     vertices = np.stack([xx.flatten(), yy.flatten(), scaled_heights.flatten()], axis=1)
     ps_mesh.update_vertex_positions(vertices)
-    ps_mesh.add_scalar_quantity("height", height_field_data.flatten(), defined_on='vertices', enabled=True, cmap='viridis')
+    ps_mesh.add_scalar_quantity(scalar_name, height_field_data.flatten(), 
+                               defined_on='vertices', enabled=True, cmap=colormap)
 
 def recreate_ocean_state():
     """Recreate the ocean plan and spectral basis with current parameters."""
-    global current_ocean_plan, current_spectral_basis, height_field_data
+    global current_ocean_plan, current_spectral_basis, height_field_data, height_field_fftw, height_field_numpy
     print("Recreating ocean state with new parameters...")
     
     # Create new ocean plan and spectral basis using functional interface
     current_ocean_plan = create_ocean_plan(ocean_params)
     current_spectral_basis = compute_spectral_basis(current_ocean_plan)
     
-    # Prepare output array for spatial heights
-    height_field_data = np.zeros((current_ocean_plan.N, current_ocean_plan.N), dtype=np.float32)
+    # Prepare output arrays for spatial heights (all methods)
+    array_shape = (current_ocean_plan.N, current_ocean_plan.N)
+    height_field_data = np.zeros(array_shape, dtype=np.float32)
+    height_field_fftw = np.zeros(array_shape, dtype=np.float32)
+    height_field_numpy = np.zeros(array_shape, dtype=np.float32)
 
 def initialize_all():
     """Full initialization - called at startup and when resolution changes."""
@@ -112,11 +176,12 @@ def initialize_all():
     update_vertices()
 
 def callback():
-    global ocean_params, current_time, wave_scale_factor
+    global ocean_params, current_time, wave_scale_factor, use_fftw, show_difference
     resolution_changed = False
     ocean_params_changed = False
     time_changed = False
     scale_changed = False
+    comparison_changed = False
 
     ps.imgui.PushItemWidth(160)
     
@@ -174,6 +239,31 @@ def callback():
             current_time = new_val
             time_changed = True
 
+    if ps.imgui.CollapsingHeader("FFT Comparison", open=True):
+        if not _HAS_FFTW:
+            ps.imgui.TextColored((1.0, 0.5, 0.0, 1.0), "FFTW not available - using numpy only")
+        else:
+            changed, new_val = ps.imgui.Checkbox("Use FFTW", use_fftw)
+            if changed:
+                use_fftw = new_val
+                comparison_changed = True
+            
+            ps.imgui.SameLine()
+            changed, new_val = ps.imgui.Checkbox("Show Difference", show_difference)
+            if changed:
+                show_difference = new_val
+                comparison_changed = True
+            
+            if show_difference:
+                ps.imgui.Separator()
+                ps.imgui.Text("Difference Statistics:")
+                ps.imgui.Text(f"Max difference: {comparison_stats['max_diff']:.2e}")
+                ps.imgui.Text(f"Mean abs diff:  {comparison_stats['mean_diff']:.2e}")
+                ps.imgui.Text(f"RMS difference: {comparison_stats['rmse_diff']:.2e}")
+                ps.imgui.Text("(Difference scaled 10x for visibility)")
+                if comparison_stats['max_diff'] < 1e-5:
+                    ps.imgui.TextColored((0.0, 1.0, 0.0, 1.0), "Excellent agreement!")
+
     if ps.imgui.CollapsingHeader("Visualization", open=True):
         changed, new_val = ps.imgui.SliderFloat("Wave Scale", wave_scale_factor, v_min=1.0, v_max=1000.0)
         if changed:
@@ -190,8 +280,8 @@ def callback():
         # Other ocean param changes need new plan and spectral basis + vertex update
         recreate_ocean_state()
         update_vertices() 
-    elif time_changed or scale_changed:
-        # Time or scale changes only need vertex update (reuses existing plan and spectral basis)
+    elif time_changed or scale_changed or comparison_changed:
+        # Time, scale, or comparison changes only need vertex update (reuses existing plan and spectral basis)
         update_vertices()
 
 def main():
