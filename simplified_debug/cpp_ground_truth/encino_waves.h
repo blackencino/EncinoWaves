@@ -467,7 +467,7 @@ void encino_waves_classic_spectral_basis_at_k(
         float const k2s = sqr(k_mag) * plan->sigma_over_rho;
         float const gpk2s = plan->gravity + k2s;
         omega = sqrtf(fabsf(k_mag * gpk2s * tanhf(hk)));
-        float const numer = ((gpk2s + k2s + k2s) * fabsf(hk)) + (hk * gpk2s / sqr(coshf(hk)));
+        float const numer = ((gpk2s + k2s + k2s) * tanhf(hk)) + (hk * gpk2s / sqr(coshf(hk)));
         domega_dk = fabsf(numer) / (2.0f * omega);
     }
 
@@ -544,7 +544,7 @@ void encino_waves_classic_spectral_basis_at_k(
 
     // Multiply DeltaSPos by domega_dk / kMag, which completes the
     // change of variables, and then multiply by dK^2.
-    float const change_of_variables_factor = (plan->dk * plan->dk) * fabsf(domega_dk / k_mag);
+    float const change_of_variables_factor = sqr(plan->dk) * fabsf(domega_dk / k_mag);
     float const delta_s_pos = spectrum * dir_spread_pos * change_of_variables_factor;
     float const delta_s_neg = spectrum * dir_spread_neg * change_of_variables_factor;
 
