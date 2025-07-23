@@ -25,6 +25,7 @@ import ctypes
 import numpy as np
 import platform
 import os
+import math
 from dataclasses import dataclass, field, replace
 from typing import Optional, Tuple, NamedTuple
 from enum import IntEnum
@@ -378,6 +379,51 @@ class OceanPlan:
         """Maximum wave number magnitude."""
         return self._c_struct.max_k_mag
     
+    @property
+    def gravity(self) -> float:
+        """Gravitational acceleration."""
+        return self._c_struct.gravity
+    
+    @property
+    def sigma_over_rho(self) -> float:
+        """Surface tension over density."""
+        return self._c_struct.sigma_over_rho
+    
+    @property
+    def depth(self) -> float:
+        """Ocean depth."""
+        return self._c_struct.depth
+    
+    @property
+    def wind_speed(self) -> float:
+        """Wind speed."""
+        return self._c_struct.wind_speed
+    
+    @property
+    def swell(self) -> float:
+        """Swell directionality."""
+        return self._c_struct.swell
+    
+    @property
+    def peak_omega(self) -> float:
+        """Peak omega."""
+        return self._c_struct.peak_omega
+    
+    @property
+    def TMA_alpha(self) -> float:
+        """TMA alpha parameter."""
+        return self._c_struct.tma_alpha
+    
+    @property
+    def TMA_gamma(self) -> float:
+        """TMA gamma parameter."""
+        return self._c_struct.tma_gamma
+    
+    @property
+    def random_seed(self) -> int:
+        """Random seed."""
+        return self._c_struct.random_seed
+    
     def _get_c_struct_pointer(self) -> ctypes.POINTER(_OceanPlanStruct):
         """Get pointer to the C struct for library calls."""
         return ctypes.byref(self._c_struct)
@@ -452,6 +498,260 @@ def compute_spectral_basis(plan: OceanPlan,
     check_error(result, "spectral_basis_omp")
     
     return out
+
+import torch
+
+@torch.jit.script
+def _torch_hash_state(state: torch.Tensor) -> torch.Tensor:
+    """
+    Equivalent to: ((STATE)*747796405U + 2891336453U)
+    We use int64 for intermediate math to prevent signed 32-bit overflow.
+    """
+    # Promote to int64, perform math, then mask back to 32-bit.
+    state_64 = state.to(torch.int64)
+    result_64 = state_64 * 747796405 + 2891336453
+    # The final result fits in a 32-bit signed int, so we can cast back.
+    return result_64.bitwise_and(0xFFFFFFFF).to(torch.int32)
+
+
+@torch.jit.script
+def _torch_u32_from_state(state: torch.Tensor) -> torch.Tensor:
+    """
+    Equivalent to the PCG XSH-RS step.
+    Handles dynamic shifts and uses int64 for intermediate multiplication.
+    """
+    # PyTorch's >> on a signed int is an arithmetic shift, but since the
+    # value of `state >> 28` is small, it works out correctly here.
+    shift = state.bitwise_right_shift(28).add(4)
+    xored = state.bitwise_right_shift(shift).bitwise_xor(state)
+
+    # Use int64 for the multiplication to avoid signed overflow
+    word_64 = xored.to(torch.int64) * 277803737
+    word = word_64.bitwise_and(0xFFFFFFFF).to(torch.int32)
+
+    # Final step
+    return word.bitwise_right_shift(22).bitwise_xor(word)
+
+
+@torch.jit.script
+def _torch_norm_f32_from_u32(u32: torch.Tensor) -> torch.Tensor:
+    """
+    Generates a float in [0.0, 1.0) from a 32-bit unsigned integer.
+    Uses the upper 23 bits as a uniform distribution.
+    """
+    # Extract the upper 23 bits by shifting right by 9
+    # This gives us values in [0, 2^23 - 1]
+    upper_bits = u32.bitwise_right_shift(9) & 0x007FFFFF
+
+    # Convert to float and normalize to [0.0, 1.0)
+    # 2^23 = 8388608.0
+    return upper_bits.to(torch.float32) / 8388608.0
+
+@torch.jit.script
+def _torch_encino_waves_spectral_wave_numbers_kernel(
+    dk: float, N: int, device: torch.device
+) -> torch.Tensor:
+    ki = N * dk * torch.fft.rfftfreq(N, dtype=torch.float32, device=device)
+    kj = N * dk * torch.fft.fftfreq(N, dtype=torch.float32, device=device)
+    ki, kj = torch.meshgrid(ki, kj, indexing="xy")
+    ki = ki.flatten()
+    kj = kj.flatten()
+    k_mag = torch.maximum(
+        torch.tensor(dk, dtype=torch.float32, device=device),
+        torch.sqrt(ki**2 + kj**2),
+    )
+
+    return torch.stack((ki, kj, k_mag), dim=1)
+
+
+@torch.jit.script
+def _torch_encino_waves_spectral_basis_kernel(
+    dk: float,
+    N: int,
+    gravity: float,
+    depth: float,
+    surface_tens_over_rho: float,
+    wind_speed: float,
+    swell: float,
+    peak_omega: float,
+    TMA_alpha: float,
+    TMA_gamma: float,
+    random_seed: int,
+    device: torch.device,
+) -> torch.Tensor:
+    wave_numbers = _torch_encino_waves_spectral_wave_numbers_kernel(dk, N, device)
+
+    ki = wave_numbers[:, 0]
+    kj = wave_numbers[:, 1]
+    k_mag = wave_numbers[:, 2]
+
+    dk2 = dk * dk
+
+    # -----------------------------------------------------------------------
+    # Dispersion (includes capillary term)
+    # -----------------------------------------------------------------------
+    hk = max(0.01, depth) * k_mag
+    tanh_hk = torch.tanh(hk)
+    cosh_hk = torch.cosh(hk)
+
+    k2 = k_mag * k_mag
+    k2s = k2 * surface_tens_over_rho
+    gpk2s = gravity + k2s  # g + sigma*k^2/rho
+
+    omega = torch.sqrt(torch.abs(k_mag * gpk2s * tanh_hk))
+
+    numer = ((gpk2s + 2.0 * k2s) * tanh_hk) + ((hk * gpk2s) / (cosh_hk * cosh_hk))
+    domega_dk = torch.abs(numer) / (2.0 * omega)
+
+    # -----------------------------------------------------------------------
+    # Directional spreading (stack pos/neg into dim -1)
+    # -----------------------------------------------------------------------
+    # theta+ and theta-
+    theta = torch.stack((torch.atan2(-kj, ki), torch.atan2(kj, -ki)), dim=1)
+
+    delta_s_multiplier = (dk2 * domega_dk / k_mag).unsqueeze(1)
+
+    inv_omega_peak_ratio = peak_omega / omega
+
+    # Handle positive vs negative swell (swell is scalar)
+    swell_step: float = 1.0 if swell > 0.0 else 0.0
+    shape_bias = swell_step * 16.1 * torch.tanh(inv_omega_peak_ratio) * swell * swell
+
+    omega_peak_ratio = omega / peak_omega
+    is_fast = omega > peak_omega
+
+    shape_gain = torch.where(
+        is_fast, torch.tensor(9.77, dtype=torch.float32), torch.tensor(6.97, dtype=torch.float32)
+    )
+
+    wind_speed_over_cel = wind_speed * peak_omega / gravity
+    shape_exp = torch.where(
+        is_fast,
+        torch.tensor(
+            -2.33 - 1.45 * (wind_speed_over_cel - 1.17), dtype=torch.float32, device=device
+        ),
+        torch.tensor(4.06, dtype=torch.float32, device=device),
+    )
+
+    shape = shape_bias + shape_gain * torch.pow(omega_peak_ratio, shape_exp)
+
+    factor_a = torch.pow(2.0, (2.0 * shape) - 1.0) / math.pi
+    factor_b = torch.exp(2.0 * torch.lgamma(shape + 1.0) - torch.lgamma((2.0 * shape) + 1.0))
+
+    factor_c = torch.abs(torch.cos(theta / 2.0))
+    factor_c *= factor_c
+
+    factor = (factor_a * factor_b).unsqueeze(1) * factor_c
+
+    # Swell interpolation factor (swell is scalar)
+    swell_interp = max(0.0, -swell)
+    dspread = delta_s_multiplier * (
+        (1.0 - swell_interp) * factor + (swell_interp * (1.0 / math.tau))
+    )
+
+
+
+    # -----------------------------------------------------------------------
+    # JONSWAP / TMA spectrum
+    # -----------------------------------------------------------------------
+    TMA_sigma = torch.where(
+        is_fast,
+        torch.tensor(0.09, dtype=torch.float32, device=device),
+        torch.tensor(0.07, dtype=torch.float32, device=device),
+    )
+    p = (omega_peak_ratio - 1.0) / TMA_sigma
+    peak_sharpen = torch.pow(TMA_gamma, torch.exp(-(p * p) / 2.0))
+
+    wh = omega * math.sqrt(depth / gravity)
+    kitaigorodskii_depth = torch.sigmoid(3.6 * (wh - 1.125))
+
+    gain = (TMA_alpha * gravity * gravity) / torch.pow(omega, 5.0)
+    alpha_beta_spec = gain * torch.exp(-1.25 * torch.pow(inv_omega_peak_ratio, 4.0))
+
+    spect_eng = kitaigorodskii_depth * peak_sharpen * alpha_beta_spec
+
+    delta_s = dspread * spect_eng.unsqueeze(1)
+
+    # -----------------------------------------------------------------------
+    #   P C G   R A N D O M   (bit-exact replication)
+    # -----------------------------------------------------------------------
+    ki_int = (ki * 10000.0).to(torch.int32)
+    kj_int = (kj * 10000.0).to(torch.int32)
+
+    state = torch.full_like(ki_int, random_seed, dtype=torch.int32)
+    state = _torch_hash_state(state)
+    state = _torch_hash_state(state + kj_int)
+    state = _torch_hash_state(state + ki_int)
+
+    u0 = _torch_u32_from_state(state)
+    state = _torch_hash_state(state)
+    u1 = _torch_u32_from_state(state)
+    state = _torch_hash_state(state)
+    u2 = _torch_u32_from_state(state)
+    state = _torch_hash_state(state)
+    u3 = _torch_u32_from_state(state)
+
+    # -----------------------------------------------------------------------
+    #   Amplitude (Box-Muller) and Phase
+    # -----------------------------------------------------------------------
+    r = torch.sqrt(-2.0 * torch.log(torch.clamp(_torch_norm_f32_from_u32(u0), 1.1920929e-07, 1.0)))
+    theta_rand = math.tau * _torch_norm_f32_from_u32(u1)
+
+    amp = torch.stack((r * torch.cos(theta_rand), r * torch.sin(theta_rand)), dim=1)
+    amp = amp * torch.sqrt(torch.abs(delta_s * 2.0))
+
+    phase = math.tau * torch.stack((_torch_norm_f32_from_u32(u2), _torch_norm_f32_from_u32(u3)), dim=1)
+
+    # h_spec = amp * exp(i*phase) = amp * (cos(phase) + i*sin(phase))
+    # We store this as a (..., 2) float tensor instead of a complex one.
+    h_spec_real = amp * torch.cos(phase)
+    h_spec_imag = amp * torch.sin(phase)
+
+
+    # h_spec: (count, 2, 2) float32
+    # Rearrange to (count, 4): [hpos_real, hpos_imag, hneg_real, hneg_imag]
+    hpos_real = h_spec_real[:, 0]
+    hpos_imag = h_spec_imag[:, 0]
+    hneg_real = h_spec_real[:, 1]
+    hneg_imag = h_spec_imag[:, 1]
+
+    out_tensor = torch.stack([hpos_real, hpos_imag, hneg_real, hneg_imag, omega], dim=1)  # (count, 5)
+
+    # Zero-wave special-case
+    mask_zero = (ki < dk) & (kj < dk)
+    out_tensor = out_tensor.masked_fill(mask_zero.unsqueeze(1), 0.0)
+
+    # Reshape to (size_j, size_i, 5) expected output shape
+    size_j = N
+    size_i = (N // 2) + 1
+    out_tensor = out_tensor.reshape(size_j, size_i, 5)
+
+    return out_tensor
+
+
+
+def compute_spectral_basis_torch(plan: OceanPlan,
+                          out: Optional[np.ndarray] = None,
+                          device: torch.device = torch.device('cpu')) -> np.ndarray:
+    out_tensor = _torch_encino_waves_spectral_basis_kernel(plan.dk,
+        plan.N,
+        plan.gravity,
+        plan.depth,
+        plan.sigma_over_rho,
+        plan.wind_speed,
+        plan.swell,
+        plan.peak_omega,
+        plan.TMA_alpha,
+        plan.TMA_gamma,
+        plan.random_seed,
+        device)
+
+    # If out is provided, copy result into it
+    if out is not None:
+        out[...] = out_tensor.cpu().numpy()
+        return out
+    else:
+        return out_tensor.cpu().numpy()
 
 
 def compute_spectral_height(plan: OceanPlan,

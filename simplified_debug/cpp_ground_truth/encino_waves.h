@@ -324,6 +324,12 @@ inline ENCINO_WAVES_HOSTDEV float smoothstepf(float const edge0, float const edg
     return t * t * (3.0f - 2.0f * t);
 }
 
+inline ENCINO_WAVES_HOSTDEV float sigmoidf(float const x) {
+    // Implement sigmoid in terms of tanh:
+    // sigmoid(x) = 0.5 * (1 + tanh(x / 2))
+    return 0.5f * (1.0f + tanhf(0.5f * x));
+}
+
 inline ENCINO_WAVES_HOSTDEV uint64_t word_from_state(uint64_t const state) {
     uint32_t s = ((uint32_t)(state));
     uint32_t const word = ((s >> ((s >> 28U) + 4U)) ^ s) * 277803737U;
@@ -493,7 +499,8 @@ void encino_waves_classic_spectral_basis_at_k(
                                          expf(-1.25f * powf(plan->peak_omega / omega, 4.0f));
 
         float const wh = omega * plan->tma_kd_gain;
-        float const kitaigorodskii_depth = 0.5f + 0.5f * tanhf(1.8f * (wh - 1.125f));
+        // float const kitaigorodskii_depth = 0.5f + 0.5f * tanhf(1.8f * (wh - 1.125f));
+        float const kitaigorodskii_depth = sigmoidf(3.6f * (wh - 1.125f));
 
         spectrum = peak_sharpening * jonswap_alpha_beta * kitaigorodskii_depth;
     }
@@ -513,7 +520,10 @@ void encino_waves_classic_spectral_basis_at_k(
         }
         shape += shape_bias;
         float const factor_a = powf(2.0f, (2.0f * shape) - 1.0f) / ENCINO_WAVES_PI;
-        float const factor_b = sqr(tgammaf(shape + 1.0f)) / tgammaf((2.0f * shape) + 1.0f);
+
+        // factor_b = torch.exp(2.0 * torch.lgamma(shape + 1.0) - torch.lgamma((2.0 * shape) - 1.0))
+        // float const factor_b = sqr(tgammaf(shape + 1.0f)) / tgammaf((2.0f * shape) + 1.0f);
+        float const factor_b = expf(2.0f * lgammaf(shape + 1.0f) - lgammaf((2.0f * shape) + 1.0f));
         float const factor_c_pos = powf(fabsf(cosf(theta_pos / 2.0f)), 2.0f * shape);
         float const factor_c_neg = powf(fabsf(cosf(theta_neg / 2.0f)), 2.0f * shape);
 
