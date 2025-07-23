@@ -200,15 +200,18 @@ class TestMultiThreading:
         plan1 = ew.create_ocean_plan(params)
         basis1 = ew.compute_spectral_basis(plan1, max_threads=1)
         height1 = ew.compute_spectral_height(plan1, 7.0, basis1, max_threads=1)
+        spatial1 = ew.compute_spatial_heights(plan1, height1)
         
         # Run pipeline with multiple threads
         plan2 = ew.create_ocean_plan(params)
         basis2 = ew.compute_spectral_basis(plan2, max_threads=8)
         height2 = ew.compute_spectral_height(plan2, 7.0, basis2, max_threads=8)
+        spatial2 = ew.compute_spatial_heights(plan2, height2)
         
         # Results should be identical
         np.testing.assert_array_equal(basis1, basis2)
         np.testing.assert_array_equal(height1, height2)
+        np.testing.assert_array_equal(spatial1, spatial2)
     
     def test_edge_case_thread_counts(self):
         """Test edge case thread counts."""
@@ -453,6 +456,171 @@ class TestSpectralHeight:
         assert np.max(magnitudes) < 1000.0  # Reasonable upper bound
 
 
+class TestSpatialHeights:
+    """Test spatial height computation (FFT)."""
+    
+    def test_spatial_heights_shape(self):
+        """Test that spatial heights have correct shape."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=128))
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, time=5.0, spectral_basis=basis)
+        spatial_heights = ew.compute_spatial_heights(plan, spectral_height)
+        
+        # Should be NxN real array
+        assert spatial_heights.shape == (128, 128)
+        assert spatial_heights.dtype == np.float32
+        
+    def test_spatial_heights_repeatability(self):
+        """Test that spatial height computation is repeatable."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=64, random_seed=12345))
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 3.0, basis)
+        
+        spatial1 = ew.compute_spatial_heights(plan, spectral_height)
+        spatial2 = ew.compute_spatial_heights(plan, spectral_height)
+        
+        np.testing.assert_array_equal(spatial1, spatial2)
+        
+    def test_spatial_heights_with_preallocated(self):
+        """Test using pre-allocated output array."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=64))
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 1.0, basis)
+        
+        # Pre-allocate array
+        out = np.zeros((64, 64), dtype=np.float32)
+        result = ew.compute_spatial_heights(plan, spectral_height, out=out)
+        
+        # Should return same array
+        assert result is out
+        
+        # Should have written data (not all zeros anymore)
+        assert not np.allclose(out, 0.0)
+        
+    def test_spatial_heights_sanity(self):
+        """Test that spatial height values are sane."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=128))
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 10.0, basis)
+        spatial_heights = ew.compute_spatial_heights(plan, spectral_height)
+        
+        # Check for NaN or infinity
+        assert np.all(np.isfinite(spatial_heights))
+        
+        # Heights should be reasonable (ocean waves typically -10m to +10m)
+        assert np.max(np.abs(spatial_heights)) < 100.0
+        
+        # Should have variation (not constant)
+        assert np.std(spatial_heights) > 1e-6
+        
+    def test_spatial_heights_time_evolution(self):
+        """Test that spatial heights evolve with time."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=64))
+        basis = ew.compute_spectral_basis(plan)
+        
+        # Compute at different times
+        spectral_t0 = ew.compute_spectral_height(plan, 0.0, basis)
+        spectral_t1 = ew.compute_spectral_height(plan, 5.0, basis)
+        
+        spatial_t0 = ew.compute_spatial_heights(plan, spectral_t0)
+        spatial_t1 = ew.compute_spatial_heights(plan, spectral_t1)
+        
+        # Spatial heights should change over time
+        assert not np.allclose(spatial_t0, spatial_t1)
+        
+        # But should have similar statistical properties
+        assert abs(np.std(spatial_t0) - np.std(spatial_t1)) < np.std(spatial_t0) * 0.5
+        
+    def test_spatial_heights_different_resolutions(self):
+        """Test spatial heights with different resolutions."""
+        for resolution in [64, 128, 256]:
+            plan = ew.create_ocean_plan(ew.OceanParameters(resolution=resolution))
+            basis = ew.compute_spectral_basis(plan)
+            spectral_height = ew.compute_spectral_height(plan, 2.0, basis)
+            spatial_heights = ew.compute_spatial_heights(plan, spectral_height)
+            
+            assert spatial_heights.shape == (resolution, resolution)
+            assert np.all(np.isfinite(spatial_heights))
+            
+    def test_spatial_heights_both_input_formats(self):
+        """Test that spatial heights works with both complex64 and float32 input formats."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=64))
+        basis = ew.compute_spectral_basis(plan)
+        
+        # Test with complex64 input
+        spectral_complex = ew.compute_spectral_height(plan, 1.0, basis)
+        spatial_from_complex = ew.compute_spatial_heights(plan, spectral_complex)
+        
+        # Test with float32 input
+        spectral_float = np.zeros((64, 33, 2), dtype=np.float32)
+        spectral_complex2 = ew.compute_spectral_height(plan, 1.0, basis, out=spectral_float)
+        spatial_from_float = ew.compute_spatial_heights(plan, spectral_float)
+        
+        # Results should be identical
+        assert spatial_from_complex.shape == (64, 64)
+        assert spatial_from_float.shape == (64, 64)
+        assert spatial_from_complex.dtype == np.float32
+        assert spatial_from_float.dtype == np.float32
+        np.testing.assert_array_equal(spatial_from_complex, spatial_from_float)
+        
+    def test_spatial_heights_validation(self):
+        """Test input validation for spatial heights computation."""
+        plan = ew.create_ocean_plan(ew.OceanParameters(resolution=64))
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 1.0, basis)
+        
+        # Test wrong spectral height shape (complex64)
+        wrong_spectral = np.zeros((32, 17), dtype=np.complex64)
+        with pytest.raises(ValueError, match="shape"):
+            ew.compute_spatial_heights(plan, wrong_spectral)
+            
+        # Test wrong spectral height shape (float32)
+        wrong_spectral_float = np.zeros((32, 17, 2), dtype=np.float32)
+        with pytest.raises(ValueError, match="shape"):
+            ew.compute_spatial_heights(plan, wrong_spectral_float)
+            
+        # Test unsupported dtype
+        wrong_dtype = np.zeros((64, 33), dtype=np.complex128)
+        with pytest.raises(ValueError, match="must be either"):
+            ew.compute_spatial_heights(plan, wrong_dtype)
+            
+        # Test wrong float32 shape (missing last dimension)
+        wrong_float_shape = np.zeros((64, 33), dtype=np.float32)
+        with pytest.raises(ValueError, match="must be either"):
+            ew.compute_spatial_heights(plan, wrong_float_shape)
+            
+        # Test wrong output array shape
+        wrong_out = np.zeros((32, 32), dtype=np.float32)
+        with pytest.raises(ValueError, match="shape"):
+            ew.compute_spatial_heights(plan, spectral_height, out=wrong_out)
+            
+        # Test wrong output array dtype
+        wrong_out_dtype = np.zeros((64, 64), dtype=np.float64)
+        with pytest.raises(ValueError, match="dtype"):
+            ew.compute_spatial_heights(plan, spectral_height, out=wrong_out_dtype)
+            
+    def test_spatial_heights_multithreading_consistency(self):
+        """Test that spatial heights are consistent regardless of spectral computation threading."""
+        if not ew._HAS_OMP:
+            pytest.skip("OpenMP not available")
+            
+        params = ew.OceanParameters(resolution=128, random_seed=54321)
+        plan = ew.create_ocean_plan(params)
+        
+        # Compute spectral basis and height with single thread
+        basis_single = ew.compute_spectral_basis(plan, max_threads=1)
+        spectral_single = ew.compute_spectral_height(plan, 4.0, basis_single, max_threads=1)
+        spatial_single = ew.compute_spatial_heights(plan, spectral_single)
+        
+        # Compute spectral basis and height with multiple threads
+        basis_multi = ew.compute_spectral_basis(plan, max_threads=8)
+        spectral_multi = ew.compute_spectral_height(plan, 4.0, basis_multi, max_threads=8)
+        spatial_multi = ew.compute_spatial_heights(plan, spectral_multi)
+        
+        # Results should be identical
+        np.testing.assert_array_equal(spatial_single, spatial_multi)
+
+
 class TestArrayValidation:
     """Test array validation and error handling."""
     
@@ -494,12 +662,14 @@ class TestFunctionalComposition:
     def test_pipeline_example(self):
         """Test the example pipeline function."""
         params = ew.OceanParameters(resolution=64)
-        plan, basis, height = ew.simulate_ocean_surface(params, time=5.0)
+        plan, basis, height, spatial = ew.simulate_ocean_surface(params, time=5.0)
         
         assert plan.N == 64
         assert basis.shape == (64, 33, 5)
         assert height.shape == (64, 33)  # Complex64 by default
         assert height.dtype == np.complex64
+        assert spatial.shape == (64, 64)  # NxN spatial heights
+        assert spatial.dtype == np.float32
         
     def test_array_reuse_in_pipeline(self):
         """Test array reuse in functional pipeline."""
@@ -509,15 +679,19 @@ class TestFunctionalComposition:
         basis_array = np.zeros((64, 33, 5), dtype=np.float32)
         height_complex = np.zeros((64, 33), dtype=np.complex64)
         height_float = np.zeros((64, 33, 2), dtype=np.float32)
+        spatial_array = np.zeros((64, 64), dtype=np.float32)
         
         # Test with complex64 output
-        plan1, basis1, height1 = ew.simulate_ocean_surface(
-            params, 1.0, basis_array, height_complex
+        plan1, basis1, height1, spatial1 = ew.simulate_ocean_surface(
+            params, 1.0, basis_array, height_complex, spatial_array
         )
         
+        # Save first spatial result before it gets overwritten
+        spatial1_copy = spatial1.copy()
+        
         # Test with float32 output  
-        plan2, basis2, height2 = ew.simulate_ocean_surface(
-            params, 2.0, basis_array, height_float
+        plan2, basis2, height2, spatial2 = ew.simulate_ocean_surface(
+            params, 2.0, basis_array, height_float, spatial_array
         )
         
         # Arrays should be the same objects
@@ -525,9 +699,13 @@ class TestFunctionalComposition:
         assert basis2 is basis_array
         assert height1 is height_complex
         assert height2 is height_float
+        assert spatial1 is spatial_array
+        assert spatial2 is spatial_array
         
         # Heights should be different (different times)
         assert not np.allclose(height1, height2.view(dtype=np.complex64).reshape(64, 33))
+        # Spatial heights should also be different (comparing saved copy vs current)
+        assert not np.allclose(spatial1_copy, spatial2)
 
 
 class TestPhysicalPlausibility:
@@ -571,6 +749,37 @@ class TestPhysicalPlausibility:
         # dk should be inversely proportional to domain
         assert plan_small.dk > plan_large.dk
         assert abs(plan_small.dk * 10.0 - plan_large.dk * 1000.0) < 1e-5
+        
+    def test_spatial_spectral_consistency(self):
+        """Test that spatial heights are physically consistent with spectral data."""
+        params = ew.OceanParameters(resolution=128, wind_speed=20.0, random_seed=42)
+        
+        # Use multiple threads if available for performance
+        max_threads = 8 if ew._HAS_OMP else 1
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan, max_threads=max_threads)
+        spectral_height = ew.compute_spectral_height(plan, 5.0, basis, max_threads=max_threads)
+        spatial_heights = ew.compute_spatial_heights(plan, spectral_height)
+        
+        # Spatial heights should be real
+        assert np.all(np.isreal(spatial_heights))
+        
+        # Energy conservation: the total energy in spatial domain should be 
+        # related to the spectral domain (Parseval's theorem)
+        spatial_energy = np.mean(spatial_heights**2)
+        spectral_energy = np.mean(np.abs(spectral_height)**2) / (plan.N * plan.N)
+        
+        # They should be of similar order of magnitude (within 2 orders)
+        assert 0.01 < spatial_energy / spectral_energy < 100.0
+        
+        # The DC component in spectral should correspond to the mean in spatial
+        # (should be close to zero for well-centered ocean simulation)
+        spatial_mean = np.mean(spatial_heights)
+        spectral_dc = spectral_height[0, 0].real / (plan.N * plan.N)
+        
+        # Both should be small for ocean waves
+        assert abs(spatial_mean) < 1.0
+        assert abs(spectral_dc) < 1.0
 
 
 if __name__ == "__main__":

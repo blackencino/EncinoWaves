@@ -488,6 +488,73 @@ def compute_spectral_height(plan: OceanPlan,
     return out
 
 
+def compute_spatial_heights(plan: OceanPlan,
+                           spectral_height: np.ndarray,
+                           out: Optional[np.ndarray] = None) -> np.ndarray:
+    """
+    Convert spectral height data to spatial height field using inverse FFT.
+    
+    This is a pure function that transforms frequency-domain wave heights
+    to spatial-domain heights using numpy.fft.irfft2.
+    
+    Args:
+        plan: Ocean simulation plan from create_ocean_plan().
+        spectral_height: Spectral height data from compute_spectral_height().
+                        Supports two formats:
+                        - (size_j, size_i) complex64: Default complex format
+                        - (size_j, size_i, 2) float32: [real, imag] components
+        out: Optional output array of shape (N, N) float32.
+             If provided, writes directly into this array for efficiency.
+             If None, allocates a new array.
+        
+    Returns:
+        Real spatial height field array with shape (N, N) float32.
+        This represents the wave heights at each grid point.
+    """
+    # Convert input to complex64 format for FFT
+    if spectral_height.dtype == np.complex64 and len(spectral_height.shape) == 2:
+        # Already in complex64 format
+        expected_shape = (plan.size_j, plan.size_i)
+        if spectral_height.shape != expected_shape:
+            raise ValueError(f"spectral_height must have shape {expected_shape}, got {spectral_height.shape}")
+        complex_data = spectral_height
+        
+    elif spectral_height.dtype == np.float32 and len(spectral_height.shape) == 3 and spectral_height.shape[2] == 2:
+        # Float32 format with [real, imag] components
+        expected_shape = (plan.size_j, plan.size_i, 2)
+        if spectral_height.shape != expected_shape:
+            raise ValueError(f"spectral_height must have shape {expected_shape}, got {spectral_height.shape}")
+        # Convert to complex64 view
+        complex_data = spectral_height.view(dtype=np.complex64).reshape(plan.size_j, plan.size_i)
+        
+    else:
+        raise ValueError(
+            f"spectral_height must be either (size_j, size_i) complex64 or (size_j, size_i, 2) float32, "
+            f"got shape {spectral_height.shape} with dtype {spectral_height.dtype}"
+        )
+    
+    if not spectral_height.flags['C_CONTIGUOUS']:
+        raise ValueError("spectral_height must be C-contiguous")
+    
+    # Prepare output array
+    spatial_shape = (plan.N, plan.N)
+    if out is None:
+        out = np.zeros(spatial_shape, dtype=np.float32)
+    else:
+        _validate_array(out, spatial_shape, np.float32, "output")
+    
+    # Perform inverse FFT to get spatial heights
+    # irfft2 expects the input to be the result of rfft2, which has shape (N, N//2+1)
+    # The spectral_height should already be in this format from the C library
+    # Use norm=None to ensure no normalization - user handles normalization internally
+    spatial_heights = np.fft.irfft2(complex_data, s=(plan.N, plan.N), norm=None)
+    
+    # Copy result to output array (with type conversion if needed)
+    out[:] = spatial_heights.astype(np.float32)
+    
+    return out
+
+
 # --- Helper Functions ---
 
 def _validate_array(arr: np.ndarray, 
@@ -565,6 +632,11 @@ def create_float_spectral_array(plan: OceanPlan) -> np.ndarray:
     return np.zeros((plan.size_j, plan.size_i, 2), dtype=np.float32)
 
 
+def create_spatial_heights_array(plan: OceanPlan) -> np.ndarray:
+    """Create a float32 array suitable for spatial height output."""
+    return np.zeros((plan.N, plan.N), dtype=np.float32)
+
+
 # --- Example Usage Functions ---
 
 def create_default_ocean_plan() -> OceanPlan:
@@ -575,9 +647,10 @@ def create_default_ocean_plan() -> OceanPlan:
 def simulate_ocean_surface(params: OceanParameters,
                           time: float,
                           spectral_basis_out: Optional[np.ndarray] = None,
-                          spectral_height_out: Optional[np.ndarray] = None) -> Tuple[OceanPlan, np.ndarray, np.ndarray]:
+                          spectral_height_out: Optional[np.ndarray] = None,
+                          spatial_heights_out: Optional[np.ndarray] = None) -> Tuple[OceanPlan, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Complete ocean simulation pipeline.
+    Complete ocean simulation pipeline including spatial height computation.
     
     This demonstrates the functional composition of the library functions.
     
@@ -588,14 +661,17 @@ def simulate_ocean_surface(params: OceanParameters,
         spectral_height_out: Optional array to reuse for spectral height. Supports:
                             - (size_j, size_i) complex64: Default, FFT-ready
                             - (size_j, size_i, 2) float32: [real, imag] components
+        spatial_heights_out: Optional array to reuse for spatial heights (shape: N, N)
         
     Returns:
-        Tuple of (plan, spectral_basis, spectral_height)
+        Tuple of (plan, spectral_basis, spectral_height, spatial_heights)
         - spectral_height: complex64 by default, or matches provided format
+        - spatial_heights: float32 array with real wave heights at each grid point
     """
     # Each step is a pure function
     plan = create_ocean_plan(params)
     spectral_basis = compute_spectral_basis(plan, out=spectral_basis_out)
     spectral_height = compute_spectral_height(plan, time, spectral_basis, out=spectral_height_out)
+    spatial_heights = compute_spatial_heights(plan, spectral_height, out=spatial_heights_out)
     
-    return plan, spectral_basis, spectral_height
+    return plan, spectral_basis, spectral_height, spatial_heights
