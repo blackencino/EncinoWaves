@@ -66,7 +66,8 @@ def _check_function_availability():
         'encino_waves_spectral_basis_omp', 
         'encino_waves_spectral_height_omp',
         'encino_waves_classic_spectral_basis_at_kidx',
-        'encino_waves_spectral_height_at'
+        'encino_waves_spectral_height_at',
+        'encino_waves_spatial_height_fftw'
     ]
     
     available = {}
@@ -90,11 +91,17 @@ if not _AVAILABLE_FUNCTIONS['encino_waves_create_ocean_plan']:
     raise RuntimeError("Core library functions not found. Library may not be properly compiled.")
 
 _HAS_OMP = _AVAILABLE_FUNCTIONS['encino_waves_spectral_basis_omp']
+_HAS_FFTW = _AVAILABLE_FUNCTIONS['encino_waves_spatial_height_fftw']
 
 if not _HAS_OMP:
     print("\nWarning: OpenMP functions not available.")
     print("Compile the C++ library with -DENCINO_WAVES_OMP_KERNELS for better performance.")
     print("Falling back to single-threaded computation.\n")
+
+if not _HAS_FFTW:
+    print("\nWarning: FFTW functions not available.")
+    print("Compile the C++ library with -DENCINO_WAVES_FFTW_KERNELS for FFTW support.")
+    print("Using numpy FFT for spatial height computation.\n")
 
 
 # --- Error Handling ---
@@ -106,6 +113,7 @@ class ErrorCode(IntEnum):
     INVALID_RESOLUTION = 2
     INVALID_RANK = 3
     INVALID_SHAPE = 4
+    FAILED_TO_CREATE_PLAN = 5
 
 
 def check_error(result: int, context: str = "") -> None:
@@ -115,7 +123,8 @@ def check_error(result: int, context: str = "") -> None:
             ErrorCode.NULL_INPUT: "Null input provided",
             ErrorCode.INVALID_RESOLUTION: "Invalid resolution (must be power of 2 between 4 and 8192)",
             ErrorCode.INVALID_RANK: "Invalid array rank",
-            ErrorCode.INVALID_SHAPE: "Invalid array shape"
+            ErrorCode.INVALID_SHAPE: "Invalid array shape",
+            ErrorCode.FAILED_TO_CREATE_PLAN: "Failed to create FFTW plan"
         }
         msg = error_messages.get(result, f"Unknown error code: {result}")
         if context:
@@ -243,6 +252,19 @@ LIB.encino_waves_spectral_height_at.argtypes = [
     ctypes.POINTER(ctypes.c_float)  # out
 ]
 LIB.encino_waves_spectral_height_at.restype = None  # void
+
+# encino_waves_spatial_height_fftw
+if _HAS_FFTW:
+    LIB.encino_waves_spatial_height_fftw.argtypes = [
+        ctypes.POINTER(_OceanPlanStruct),
+        ctypes.c_int,  # in_rank
+        ctypes.POINTER(ctypes.c_int),  # in_shape
+        ctypes.POINTER(ctypes.c_float),  # spectral_height
+        ctypes.c_int,  # out_rank
+        ctypes.POINTER(ctypes.c_int),  # out_shape
+        ctypes.POINTER(ctypes.c_float)  # out_spatial_height
+    ]
+    LIB.encino_waves_spatial_height_fftw.restype = ctypes.c_int
 
 
 # --- Immutable Data Classes ---
@@ -546,11 +568,96 @@ def compute_spatial_heights(plan: OceanPlan,
     # Perform inverse FFT to get spatial heights
     # irfft2 expects the input to be the result of rfft2, which has shape (N, N//2+1)
     # The spectral_height should already be in this format from the C library
-    # Use norm=None to ensure no normalization - user handles normalization internally
+    # Use norm=None (no normalization) - this is standard for Tessendorf wave simulations
     spatial_heights = np.fft.irfft2(complex_data, s=(plan.N, plan.N), norm=None)
     
     # Copy result to output array (with type conversion if needed)
     out[:] = spatial_heights.astype(np.float32)
+    
+    return out
+
+
+def compute_spatial_heights_fftw(plan: OceanPlan,
+                                spectral_height: np.ndarray,
+                                out: Optional[np.ndarray] = None) -> np.ndarray:
+    """
+    Convert spectral height data to spatial height field using FFTW.
+    
+    This is a pure function that transforms frequency-domain wave heights
+    to spatial-domain heights using the FFTW library for potentially better performance.
+    
+    Args:
+        plan: Ocean simulation plan from create_ocean_plan().
+        spectral_height: Spectral height data from compute_spectral_height().
+                        Supports two formats:
+                        - (size_j, size_i) complex64: Default complex format
+                        - (size_j, size_i, 2) float32: [real, imag] components
+        out: Optional output array of shape (N, N) float32.
+             If provided, writes directly into this array for efficiency.
+             If None, allocates a new array.
+        
+    Returns:
+        Real spatial height field array with shape (N, N) float32.
+        This represents the wave heights at each grid point.
+        
+    Raises:
+        RuntimeError: If FFTW functions are not available in the library.
+    """
+    if not _HAS_FFTW:
+        raise RuntimeError(
+            "FFTW functions not available. Compile with -DENCINO_WAVES_FFTW_KERNELS or use compute_spatial_heights() instead."
+        )
+    
+    # Convert input to float32 format for C library
+    if spectral_height.dtype == np.complex64 and len(spectral_height.shape) == 2:
+        # Already in complex64 format - convert to float32 view
+        expected_shape = (plan.size_j, plan.size_i)
+        if spectral_height.shape != expected_shape:
+            raise ValueError(f"spectral_height must have shape {expected_shape}, got {spectral_height.shape}")
+        # Convert to float32 view with [real, imag] components
+        float_view = spectral_height.view(dtype=np.float32)
+        spectral_height_for_c = float_view.reshape(plan.size_j, plan.size_i, 2)
+        
+    elif spectral_height.dtype == np.float32 and len(spectral_height.shape) == 3 and spectral_height.shape[2] == 2:
+        # Float32 format with [real, imag] components - already correct
+        expected_shape = (plan.size_j, plan.size_i, 2)
+        if spectral_height.shape != expected_shape:
+            raise ValueError(f"spectral_height must have shape {expected_shape}, got {spectral_height.shape}")
+        spectral_height_for_c = spectral_height
+        
+    else:
+        raise ValueError(
+            f"spectral_height must be either (size_j, size_i) complex64 or (size_j, size_i, 2) float32, "
+            f"got shape {spectral_height.shape} with dtype {spectral_height.dtype}"
+        )
+    
+    if not spectral_height_for_c.flags['C_CONTIGUOUS']:
+        raise ValueError("spectral_height must be C-contiguous")
+    
+    # Prepare output array
+    spatial_shape = (plan.N, plan.N)
+    if out is None:
+        out = np.zeros(spatial_shape, dtype=np.float32)
+    else:
+        _validate_array(out, spatial_shape, np.float32, "output")
+    
+    # Prepare for C call
+    in_shape = (ctypes.c_int * 3)(plan.size_j, plan.size_i, 2)
+    out_shape = (ctypes.c_int * 2)(plan.N, plan.N)
+    
+    result = LIB.encino_waves_spatial_height_fftw(
+        plan._get_c_struct_pointer(),
+        3,  # in_rank
+        in_shape,
+        spectral_height_for_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+        2,  # out_rank
+        out_shape,
+        out.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+    )
+    check_error(result, "spatial_height_fftw")
+    
+    # FFTW output is used as-is without normalization
+    # The C library is responsible for providing the correct values
     
     return out
 

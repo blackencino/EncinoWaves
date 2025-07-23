@@ -767,6 +767,7 @@ class TestPhysicalPlausibility:
         # Energy conservation: the total energy in spatial domain should be 
         # related to the spectral domain (Parseval's theorem)
         spatial_energy = np.mean(spatial_heights**2)
+        # With norm=None, standard Parseval's theorem: spatial_energy = spectral_energy / N²
         spectral_energy = np.mean(np.abs(spectral_height)**2) / (plan.N * plan.N)
         
         # They should be of similar order of magnitude (within 2 orders)
@@ -775,11 +776,260 @@ class TestPhysicalPlausibility:
         # The DC component in spectral should correspond to the mean in spatial
         # (should be close to zero for well-centered ocean simulation)
         spatial_mean = np.mean(spatial_heights)
+        # With norm=None, DC component needs to be scaled by 1/N²
         spectral_dc = spectral_height[0, 0].real / (plan.N * plan.N)
         
         # Both should be small for ocean waves
         assert abs(spatial_mean) < 1.0
         assert abs(spectral_dc) < 1.0
+
+
+class TestFFTWComparison:
+    """Test comparisons between numpy FFT and FFTW implementations."""
+    
+    def test_fftw_availability(self):
+        """Test if FFTW functions are available and print diagnostics."""
+        # This should match the availability check in encino_waves.py
+        has_fftw = ew._HAS_FFTW
+        print(f"\nFFTW functions available: {has_fftw}")
+        
+        if not has_fftw:
+            pytest.skip("FFTW functions not available - compile with -DENCINO_WAVES_FFTW_KERNELS")
+    
+    def test_fftw_numpy_equivalence(self):
+        """Test that FFTW and numpy FFT produce equivalent results."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        # Test with multiple resolutions
+        for resolution in [64, 128]:
+            params = ew.OceanParameters(resolution=resolution, random_seed=12345)
+            plan = ew.create_ocean_plan(params)
+            basis = ew.compute_spectral_basis(plan)
+            spectral_height = ew.compute_spectral_height(plan, 5.0, basis)
+            
+            # Compute spatial heights with both methods
+            spatial_numpy = ew.compute_spatial_heights(plan, spectral_height)
+            spatial_fftw = ew.compute_spatial_heights_fftw(plan, spectral_height)
+            
+            print(f"\nResolution {resolution}:")
+            print(f"Numpy result - shape: {spatial_numpy.shape}, dtype: {spatial_numpy.dtype}")
+            print(f"FFTW result - shape: {spatial_fftw.shape}, dtype: {spatial_fftw.dtype}")
+            print(f"Numpy stats - min: {np.min(spatial_numpy):.6f}, max: {np.max(spatial_numpy):.6f}, mean: {np.mean(spatial_numpy):.6f}, std: {np.std(spatial_numpy):.6f}")
+            print(f"FFTW stats - min: {np.min(spatial_fftw):.6f}, max: {np.max(spatial_fftw):.6f}, mean: {np.mean(spatial_fftw):.6f}, std: {np.std(spatial_fftw):.6f}")
+            
+            # Compute differences
+            diff = spatial_numpy - spatial_fftw
+            max_abs_diff = np.max(np.abs(diff))
+            mean_abs_diff = np.mean(np.abs(diff))
+            rel_diff = max_abs_diff / (np.max(np.abs(spatial_numpy)) + 1e-10)
+            
+            print(f"Differences - max_abs: {max_abs_diff:.6f}, mean_abs: {mean_abs_diff:.6f}, rel: {rel_diff:.6f}")
+            
+            # They should be very close (within floating point precision)
+            # Note: Different FFT implementations (FFTW vs numpy) can have small numerical differences
+            # due to algorithm variations, so we use a more relaxed tolerance
+            np.testing.assert_allclose(spatial_numpy, spatial_fftw, rtol=1e-3, atol=1e-2,
+                err_msg=f"FFTW and numpy results differ at resolution {resolution}")
+    
+    def test_fftw_numpy_both_input_formats(self):
+        """Test that FFTW works with both complex64 and float32 input formats."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        params = ew.OceanParameters(resolution=64, random_seed=98765)
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan)
+        
+        # Test with complex64 input
+        spectral_complex = ew.compute_spectral_height(plan, 3.0, basis)
+        spatial_numpy_complex = ew.compute_spatial_heights(plan, spectral_complex)
+        spatial_fftw_complex = ew.compute_spatial_heights_fftw(plan, spectral_complex)
+        
+        # Test with float32 input
+        spectral_float = np.zeros((64, 33, 2), dtype=np.float32)
+        ew.compute_spectral_height(plan, 3.0, basis, out=spectral_float)
+        spatial_numpy_float = ew.compute_spatial_heights(plan, spectral_float)
+        spatial_fftw_float = ew.compute_spatial_heights_fftw(plan, spectral_float)
+        
+        # All four results should be equivalent
+        print(f"\nInput format comparison:")
+        print(f"Numpy complex vs FFTW complex - max diff: {np.max(np.abs(spatial_numpy_complex - spatial_fftw_complex)):.6f}")
+        print(f"Numpy float vs FFTW float - max diff: {np.max(np.abs(spatial_numpy_float - spatial_fftw_float)):.6f}")
+        print(f"Complex vs float (numpy) - max diff: {np.max(np.abs(spatial_numpy_complex - spatial_numpy_float)):.6f}")
+        print(f"Complex vs float (FFTW) - max diff: {np.max(np.abs(spatial_fftw_complex - spatial_fftw_float)):.6f}")
+        
+        np.testing.assert_allclose(spatial_numpy_complex, spatial_fftw_complex, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(spatial_numpy_float, spatial_fftw_float, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(spatial_numpy_complex, spatial_numpy_float, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(spatial_fftw_complex, spatial_fftw_float, rtol=1e-5, atol=1e-6)
+    
+    def test_fftw_with_preallocated_arrays(self):
+        """Test FFTW with pre-allocated output arrays."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        params = ew.OceanParameters(resolution=128, random_seed=54321)
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 2.0, basis)
+        
+        # Pre-allocate arrays
+        numpy_out = np.zeros((128, 128), dtype=np.float32)
+        fftw_out = np.zeros((128, 128), dtype=np.float32)
+        
+        # Compute with pre-allocated arrays
+        numpy_result = ew.compute_spatial_heights(plan, spectral_height, out=numpy_out)
+        fftw_result = ew.compute_spatial_heights_fftw(plan, spectral_height, out=fftw_out)
+        
+        # Should return the same arrays
+        assert numpy_result is numpy_out
+        assert fftw_result is fftw_out
+        
+        # Results should be equivalent
+        np.testing.assert_allclose(numpy_out, fftw_out, rtol=1e-5, atol=1e-6)
+    
+    def test_fftw_error_handling(self):
+        """Test FFTW error handling and validation."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        params = ew.OceanParameters(resolution=64)
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 1.0, basis)
+        
+        # Test wrong spectral height shape (complex64)
+        wrong_spectral = np.zeros((32, 17), dtype=np.complex64)
+        with pytest.raises(ValueError, match="shape"):
+            ew.compute_spatial_heights_fftw(plan, wrong_spectral)
+            
+        # Test wrong spectral height shape (float32)
+        wrong_spectral_float = np.zeros((32, 17, 2), dtype=np.float32)
+        with pytest.raises(ValueError, match="shape"):
+            ew.compute_spatial_heights_fftw(plan, wrong_spectral_float)
+            
+        # Test unsupported dtype
+        wrong_dtype = np.zeros((64, 33), dtype=np.complex128)
+        with pytest.raises(ValueError, match="must be either"):
+            ew.compute_spatial_heights_fftw(plan, wrong_dtype)
+            
+        # Test wrong output array shape
+        wrong_out = np.zeros((32, 32), dtype=np.float32)
+        with pytest.raises(ValueError, match="shape"):
+            ew.compute_spatial_heights_fftw(plan, spectral_height, out=wrong_out)
+            
+        # Test wrong output array dtype
+        wrong_out_dtype = np.zeros((64, 64), dtype=np.float64)
+        with pytest.raises(ValueError, match="dtype"):
+            ew.compute_spatial_heights_fftw(plan, spectral_height, out=wrong_out_dtype)
+    
+    def test_fftw_time_evolution_consistency(self):
+        """Test that FFTW and numpy give consistent time evolution."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        params = ew.OceanParameters(resolution=128, random_seed=11111)
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan)
+        
+        times = [0.0, 1.0, 2.0, 5.0, 10.0]
+        for time in times:
+            spectral_height = ew.compute_spectral_height(plan, time, basis)
+            
+            spatial_numpy = ew.compute_spatial_heights(plan, spectral_height)
+            spatial_fftw = ew.compute_spatial_heights_fftw(plan, spectral_height)
+            
+            max_diff = np.max(np.abs(spatial_numpy - spatial_fftw))
+            print(f"Time {time:4.1f} - max difference: {max_diff:.8f}")
+            
+            np.testing.assert_allclose(spatial_numpy, spatial_fftw, rtol=1e-5, atol=1e-6,
+                err_msg=f"FFTW and numpy differ at time {time}")
+    
+    def test_fftw_normalization_investigation(self):
+        """Investigate potential normalization differences between numpy and FFTW."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        params = ew.OceanParameters(resolution=64, random_seed=22222)
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 1.0, basis)
+        
+        # Compute with both methods
+        spatial_numpy = ew.compute_spatial_heights(plan, spectral_height)
+        spatial_fftw = ew.compute_spatial_heights_fftw(plan, spectral_height)
+        
+        print(f"\nNormalization investigation:")
+        print(f"Spectral input shape: {spectral_height.shape}, dtype: {spectral_height.dtype}")
+        print(f"Plan N: {plan.N}, size_i: {plan.size_i}, size_j: {plan.size_j}")
+        
+        # Check DC component
+        dc_spectral = spectral_height[0, 0]
+        dc_spatial_numpy = np.mean(spatial_numpy)
+        dc_spatial_fftw = np.mean(spatial_fftw)
+        
+        print(f"DC component - spectral: {dc_spectral}")
+        print(f"DC component - spatial numpy mean: {dc_spatial_numpy:.8f}")
+        print(f"DC component - spatial FFTW mean: {dc_spatial_fftw:.8f}")
+        print(f"Expected spatial DC (spectral/N²): {dc_spectral.real / (plan.N * plan.N):.8f}")
+        
+        # Check total energy
+        spectral_energy = np.sum(np.abs(spectral_height)**2)
+        spatial_energy_numpy = np.sum(spatial_numpy**2)
+        spatial_energy_fftw = np.sum(spatial_fftw**2)
+        
+        print(f"Total energy - spectral: {spectral_energy:.8f}")
+        print(f"Total energy - spatial numpy: {spatial_energy_numpy:.8f}")
+        print(f"Total energy - spatial FFTW: {spatial_energy_fftw:.8f}")
+        print(f"Energy ratio (numpy/spectral): {spatial_energy_numpy / spectral_energy:.8f}")
+        print(f"Energy ratio (FFTW/spectral): {spatial_energy_fftw / spectral_energy:.8f}")
+        
+        # Investigate scaling relationship
+        ratio_numpy_fftw = np.mean(spatial_numpy / (spatial_fftw + 1e-10))
+        print(f"Mean ratio (numpy/FFTW): {ratio_numpy_fftw:.8f}")
+        
+        # Check if it's a simple scaling factor
+        spatial_fftw_scaled = spatial_fftw * ratio_numpy_fftw
+        scaling_diff = np.max(np.abs(spatial_numpy - spatial_fftw_scaled))
+        print(f"After scaling FFTW by ratio - max diff: {scaling_diff:.8f}")
+    
+    def test_debug_spectral_input_investigation(self):
+        """Debug the spectral input format and values going to FFTW vs numpy."""
+        if not ew._HAS_FFTW:
+            pytest.skip("FFTW not available")
+            
+        params = ew.OceanParameters(resolution=64, random_seed=33333)
+        plan = ew.create_ocean_plan(params)
+        basis = ew.compute_spectral_basis(plan)
+        spectral_height = ew.compute_spectral_height(plan, 0.5, basis)
+        
+        print(f"\nSpectral input investigation:")
+        print(f"Spectral height shape: {spectral_height.shape}, dtype: {spectral_height.dtype}")
+        print(f"Is C-contiguous: {spectral_height.flags['C_CONTIGUOUS']}")
+        
+        # Look at a few specific values
+        print(f"spectral_height[0,0] (DC): {spectral_height[0,0]}")
+        print(f"spectral_height[1,0]: {spectral_height[1,0]}")
+        print(f"spectral_height[0,1]: {spectral_height[0,1]}")
+        print(f"spectral_height[1,1]: {spectral_height[1,1]}")
+        
+        # Convert to float32 format to see what FFTW gets
+        float_view = spectral_height.view(dtype=np.float32)
+        spectral_float = float_view.reshape(plan.size_j, plan.size_i, 2)
+        
+        print(f"Float view shape: {spectral_float.shape}")
+        print(f"spectral_float[0,0,:] (DC as [real,imag]): {spectral_float[0,0,:]}")
+        print(f"spectral_float[1,0,:]: {spectral_float[1,0,:]}")
+        print(f"spectral_float[0,1,:]: {spectral_float[0,1,:]}")
+        print(f"spectral_float[1,1,:]: {spectral_float[1,1,:]}")
+        
+        # Compute and compare
+        spatial_numpy = ew.compute_spatial_heights(plan, spectral_height)  
+        spatial_fftw = ew.compute_spatial_heights_fftw(plan, spectral_height)
+        
+        print(f"Spatial results - numpy[0,0]: {spatial_numpy[0,0]:.8f}, FFTW[0,0]: {spatial_fftw[0,0]:.8f}")
+        print(f"Spatial results - numpy[1,0]: {spatial_numpy[1,0]:.8f}, FFTW[1,0]: {spatial_fftw[1,0]:.8f}")
 
 
 if __name__ == "__main__":

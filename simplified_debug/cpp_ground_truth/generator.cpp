@@ -12,6 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#define ENCINO_WAVES_OMP_KERNELS
+#define ENCINO_WAVES_OMP_KERNELS 1
+#define ENCINO_WAVES_FFTW_KERNELS 1
 #include "encino_waves.h"
-#undef ENCINO_WAVES_OMP_KERNELS

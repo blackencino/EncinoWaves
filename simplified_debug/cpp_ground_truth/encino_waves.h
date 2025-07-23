@@ -19,6 +19,8 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #if !defined(__CUDA_ARCH__)
 
@@ -51,6 +53,7 @@ extern "C" {
 #define ENCINO_WAVES_ERROR_INVALID_RESOLUTION 2
 #define ENCINO_WAVES_ERROR_INVALID_RANK 3
 #define ENCINO_WAVES_ERROR_INVALID_SHAPE 4
+#define ENCINO_WAVES_ERROR_FAILED_TO_CREATE_PLAN 5
 
 // Parameter defaults and ranges
 
@@ -268,6 +271,29 @@ int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
                                      float* out_spectral_height);
 
 #endif  // ENCINO_WAVES_OMP_KERNELS
+
+/**********************************************************************************************
+ *                                BEGIN FFTW HEADER SECTION                                   *
+ **********************************************************************************************/
+
+#ifdef ENCINO_WAVES_FFTW_KERNELS
+
+#include <fftw3.h>
+
+ENCINO_WAVES_API
+int encino_waves_spatial_height_fftw(struct Encino_waves_ocean_plan const* plan,
+                                     int in_rank,
+                                     int const* in_shape,
+                                     float const* spectral_height,
+
+                                     int out_rank,
+                                     int const* out_shape,
+                                     float* out_spatial_height);
+
+ENCINO_WAVES_API
+void encino_waves_clear_fftwf_c2r_plan_cache(void);
+
+#endif  // ENCINO_WAVES_FFTW_KERNELS
 
 /**********************************************************************************************
  *                                END OF HEADER SECTION                                       *
@@ -850,6 +876,111 @@ int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
 }
 
 #endif  // ENCINO_WAVES_OMP_KERNELS
+
+/**********************************************************************************************
+ *                                BEGIN FFTW BODY SECTION                                     *
+ **********************************************************************************************/
+
+#ifdef ENCINO_WAVES_FFTW_KERNELS
+
+// Simple C cache for fftwf_plan for NxN C2R inverse 2D FFTs.
+// Not thread-safe, not OMP-aware. Plans are created with NULL in/out so they can be used with any compatible arrays.
+
+#define ENCINO_WAVES_MAX_FFTW_PLAN_CACHE 12  // Enough for all powers of 2 from 4 to 8192 (12 values)
+
+typedef struct {
+    int N;
+    fftwf_plan plan;
+    fftwf_complex* copied_in;
+} encino_waves_fftwf_plan_entry;
+
+static encino_waves_fftwf_plan_entry g_fftwf_c2r_plan_cache[ENCINO_WAVES_MAX_FFTW_PLAN_CACHE];
+static int g_fftwf_c2r_plan_cache_size = 0;
+
+// Returns a pointer to the plan entry for the given N, creating and caching it if necessary.
+// The returned entry contains the plan and a temp buffer for input copying.
+static encino_waves_fftwf_plan_entry* encino_waves_get_fftwf_c2r_plan_entry(int N) {
+    // Search for existing plan entry
+    for (int i = 0; i < g_fftwf_c2r_plan_cache_size; ++i) {
+        if (g_fftwf_c2r_plan_cache[i].N == N) { return &g_fftwf_c2r_plan_cache[i]; }
+    }
+
+    // Not found, create new plan entry if space
+    if (g_fftwf_c2r_plan_cache_size < ENCINO_WAVES_MAX_FFTW_PLAN_CACHE) {
+        encino_waves_fftwf_plan_entry* entry = &g_fftwf_c2r_plan_cache[g_fftwf_c2r_plan_cache_size];
+        entry->N = N;
+        entry->copied_in = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * N * (N / 2 + 1));
+        entry->plan = fftwf_plan_dft_c2r_2d(N, N, entry->copied_in, NULL, FFTW_ESTIMATE);
+        if (entry->plan && entry->copied_in) {
+            ++g_fftwf_c2r_plan_cache_size;
+            return entry;
+        }
+        // Cleanup on failure
+        if (entry->plan) {
+            fftwf_destroy_plan(entry->plan);
+            entry->plan = NULL;
+        }
+        if (entry->copied_in) {
+            fftwf_free(entry->copied_in);
+            entry->copied_in = NULL;
+        }
+        return NULL;
+    }
+
+    // No space left
+    return NULL;
+}
+
+// Cleanup function to destroy all cached FFTW plans
+// This is called automatically via atexit(), but can also be called manually
+ENCINO_WAVES_API
+void encino_waves_clear_fftwf_c2r_plan_cache(void) {
+    for (int i = 0; i < g_fftwf_c2r_plan_cache_size; ++i) {
+        if (g_fftwf_c2r_plan_cache[i].plan) {
+            fftwf_destroy_plan(g_fftwf_c2r_plan_cache[i].plan);
+            g_fftwf_c2r_plan_cache[i].plan = NULL;
+            fftwf_free(g_fftwf_c2r_plan_cache[i].copied_in);
+            g_fftwf_c2r_plan_cache[i].copied_in = NULL;
+        }
+    }
+    g_fftwf_c2r_plan_cache_size = 0;
+}
+
+ENCINO_WAVES_API
+int encino_waves_spatial_height_fftw(struct Encino_waves_ocean_plan const* plan,
+                                     int in_rank,
+                                     int const* in_shape,
+                                     float const* spectral_height,
+
+                                     int out_rank,
+                                     int const* out_shape,
+                                     float* out_spatial_height) {
+    if (!plan || !in_shape || !spectral_height || !out_shape || !out_spatial_height) {
+        return ENCINO_WAVES_ERROR_NULL_INPUT;
+    }
+
+    if (in_rank != 3 || in_shape[0] != plan->size_j || in_shape[1] != plan->size_i || in_shape[2] != 2) {
+        return ENCINO_WAVES_ERROR_INVALID_SHAPE;
+    }
+
+    if (out_rank != 2 || out_shape[0] != plan->N || out_shape[1] != plan->N) {
+        return ENCINO_WAVES_ERROR_INVALID_SHAPE;
+    }
+
+    // Get cached plan (creates if needed)
+    encino_waves_fftwf_plan_entry* entry = encino_waves_get_fftwf_c2r_plan_entry(plan->N);
+    if (!entry) { return ENCINO_WAVES_ERROR_FAILED_TO_CREATE_PLAN; }
+
+    // Copy input to cached plan's temp buffer
+    memcpy(entry->copied_in, spectral_height, sizeof(fftwf_complex) * plan->count);
+
+    // Execute with cached plan
+    fftwf_execute_dft_c2r(entry->plan, entry->copied_in, out_spatial_height);
+
+    return ENCINO_WAVES_ERROR_OK;
+}
+
+#endif  // ENCINO_WAVES_FFTW_KERNELS
 
 #endif  // ENCINO_WAVES_SOURCE_CODE_HEADER_ONLY
 
