@@ -17,8 +17,8 @@
 #ifndef ENCINO_WAVES_H_INCLUDED
 #define ENCINO_WAVES_H_INCLUDED
 
-#include <cstdint.h>
 #include <math.h>
+#include <stdint.h>
 
 #if !defined(__CUDA_ARCH__)
 
@@ -259,6 +259,7 @@ int encino_waves_spectral_basis_omp(struct Encino_waves_ocean_plan const* plan,
 ENCINO_WAVES_API
 int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
                                      float time,
+                                     int max_threads,
                                      int in_rank,
                                      int const* in_shape,
                                      float const* spectral_basis,
@@ -342,7 +343,7 @@ int encino_waves_create_ocean_plan(struct Encino_waves_ocean_params const* param
     float const rho = clampf(fabsf(params->density), ENCINO_WAVES_DENSITY_MIN, ENCINO_WAVES_DENSITY_MAX);
     out->depth = clampf(fabsf(params->depth), ENCINO_WAVES_DEPTH_MIN, ENCINO_WAVES_DEPTH_MAX);
     out->wind_speed = clampf(fabsf(params->wind_speed), ENCINO_WAVES_WIND_SPEED_MIN, ENCINO_WAVES_WIND_SPEED_MAX);
-    out->fetch_m = 1000.0f * clampf(fabsf(params->fetch), ENCINO_WAVES_FETCH_KM_MIN, ENCINO_WAVES_FETCH_KM_MAX);
+    out->fetch_m = 1000.0f * clampf(fabsf(params->fetch_km), ENCINO_WAVES_FETCH_KM_MIN, ENCINO_WAVES_FETCH_KM_MAX);
     out->swell = clampf(params->swell, ENCINO_WAVES_SWELL_MIN, ENCINO_WAVES_SWELL_MAX);
 
     out->sigma_over_rho = surface_tension / rho;
@@ -753,7 +754,7 @@ int encino_waves_spectral_height_cuda(cudaStream_t stream,
         return ENCINO_WAVES_ERROR_INVALID_SHAPE;
     }
 
-    if (out_rank != 2 || out_shape[0] != plan->size_j || out_shape[1] != plan->size_i) {
+    if (out_rank != 3 || out_shape[0] != plan->size_j || out_shape[1] != plan->size_i || out_shape[2] != 2) {
         return ENCINO_WAVES_ERROR_INVALID_SHAPE;
     }
 
@@ -803,7 +804,7 @@ int encino_waves_spectral_basis_omp(struct Encino_waves_ocean_plan const* plan,
         int begin = tid * chunk;
         int end = (begin + chunk < total) ? (begin + chunk) : total;
 
-        encino_waves_classic_spectral_basis_block(plan, begin, end, 1, out_spectral_basis + begin * 5);
+        encino_waves_classic_spectral_basis_block(plan, begin, end, 1, out_spectral_basis);
     }
 
     return ENCINO_WAVES_ERROR_OK;
@@ -812,6 +813,7 @@ int encino_waves_spectral_basis_omp(struct Encino_waves_ocean_plan const* plan,
 ENCINO_WAVES_API
 int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
                                      float time,
+                                     int max_threads,
                                      int in_rank,
                                      int const* in_shape,
                                      float const* spectral_basis,
@@ -826,12 +828,12 @@ int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
         return ENCINO_WAVES_ERROR_INVALID_SHAPE;
     }
 
-    if (out_rank != 2 || out_shape[0] != plan->size_j || out_shape[1] != plan->size_i) {
+    if (out_rank != 3 || out_shape[0] != plan->size_j || out_shape[1] != plan->size_i || out_shape[2] != 2) {
         return ENCINO_WAVES_ERROR_INVALID_SHAPE;
     }
 
     int total = plan->count;
-    int nthreads = omp_get_max_threads();
+    int nthreads = (max_threads > 0) ? max_threads : omp_get_max_threads();
 
 #pragma omp parallel num_threads(nthreads)
     {
@@ -841,7 +843,7 @@ int encino_waves_spectral_height_omp(struct Encino_waves_ocean_plan const* plan,
         int begin = tid * chunk;
         int end = (begin + chunk < total) ? (begin + chunk) : total;
 
-        encino_waves_spectral_height_block(plan, time, spectral_basis, begin, end, 1, out_spectral_height + begin);
+        encino_waves_spectral_height_block(plan, time, spectral_basis, begin, end, 1, out_spectral_height);
     }
 
     return ENCINO_WAVES_ERROR_OK;
