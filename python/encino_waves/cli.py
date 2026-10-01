@@ -6,7 +6,7 @@ import json
 import math
 import time
 import numpy as np
-from .model import Wave_parameters, make_initial_state, evaluate, texture_arrays, synchronize, select_device
+from .model import Wave_parameters, Phase_step, make_initial_state, evaluate, texture_arrays, synchronize, select_device
 
 
 def parser():
@@ -96,6 +96,8 @@ def main(argv=None):
         start_time=10.0
         shading=None
         comparison_shading=None
+        post_seed=False
+        phase_steps=()
         if args.scene:
             saved=json.loads(args.scene.read_text())
             p=Wave_parameters(**saved["parameters"])
@@ -103,6 +105,8 @@ def main(argv=None):
             camera=Camera(**saved["camera"]); look=Look(**saved["look"])
             if args.sky is None and saved.get("sky"): args.sky=Path(saved["sky"])
             start_time=saved.get("time",start_time)
+            post_seed=saved.get("post_seed",False)
+            phase_steps=tuple(Phase_step(**step) for step in saved.get("phase_steps",()))
             args.compare=args.compare or saved.get("comparison",False)
             if saved.get("shading_statistics"): shading=Shading_statistics(**saved["shading_statistics"])
             if saved.get("comparison_shading_statistics"): comparison_shading=Shading_statistics(**saved["comparison_shading_statistics"])
@@ -111,20 +115,23 @@ def main(argv=None):
         if args.command=="still":
             if args.output.exists() and not args.overwrite: raise FileExistsError(args.output)
             from PIL import Image
-            state=make_initial_state(p,args.device)
+            from .editing import make_edited_state
+            def make_state(parameters):
+                return make_edited_state(parameters,args.device,phase_steps) if post_seed or phase_steps else make_initial_state(parameters,args.device)
+            state=make_state(p)
             renderer=Ocean_renderer(make_device(),args.sky,mesh_resolution=(960,576))
             renderer.upload(evaluate(state,start_time))
             if shading: renderer.restore_shading_statistics(shading)
             other=None
             if args.compare:
                 other=Ocean_renderer(renderer.device,args.sky,mesh_resolution=(960,576))
-                other.upload(evaluate(make_initial_state(p.tessendorf(),args.device),start_time))
+                other.upload(evaluate(make_state(p.tessendorf()),start_time))
                 if comparison_shading: other.restore_shading_statistics(comparison_shading)
             args.output.parent.mkdir(parents=True,exist_ok=True)
             Image.fromarray(renderer.render_image(args.width,args.height,camera,look,left_renderer=other)).save(args.output)
             print(args.output); return
         if args.seconds<=0: raise ValueError("seconds must be positive")
-        shots=(Shot(args.seconds,scene.name,scene.description,p,args.compare,camera,look,start_time,shading,comparison_shading),)
+        shots=(Shot(args.seconds,scene.name,scene.description,p,args.compare,camera,look,start_time,shading,comparison_shading,post_seed,phase_steps),)
     if args.fps<1 or args.fps>120: raise ValueError("fps must be between 1 and 120")
     if args.max_mbps is not None and (not math.isfinite(args.max_mbps) or args.max_mbps<=0):
         raise ValueError("max-mbps must be finite and positive")

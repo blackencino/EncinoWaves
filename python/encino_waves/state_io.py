@@ -4,18 +4,22 @@ from dataclasses import asdict
 import json
 import numpy as np
 import torch
-from .model import Wave_parameters, Initial_state, select_device
+from .model import Wave_parameters, Initial_state, Phase_step, select_device
 
 
 def save_initial_state(path,state):
     arrays={name:getattr(state,name).detach().cpu().numpy() for name in ("h_positive","h_negative","omega","multipliers")}
-    np.savez_compressed(path,parameters=json.dumps(asdict(state.parameters)),version=1,**arrays)
+    if state.phase is not None:
+        arrays["phase"]=state.phase.detach().cpu().numpy()
+    np.savez_compressed(path,parameters=json.dumps(asdict(state.parameters)),version=2,
+                        phase_steps=json.dumps([asdict(step) for step in state.phase_steps]),**arrays)
 
 
 def load_initial_state(path,device="auto"):
     device=select_device(str(device))
     with np.load(path,allow_pickle=False) as data:
-        if int(data["version"])!=1: raise ValueError("Unsupported spectral snapshot version")
+        version=int(data["version"])
+        if version not in (1,2): raise ValueError("Unsupported spectral snapshot version")
         p=Wave_parameters(**json.loads(str(data["parameters"])))
         shape=(p.resolution,p.resolution//2+1)
         tensors=[]
@@ -26,4 +30,13 @@ def load_initial_state(path,device="auto"):
             if array.shape!=expected or array.dtype!=dtype or not np.isfinite(array).all():
                 raise ValueError(f"Invalid {name} in spectral snapshot")
             tensors.append(torch.from_numpy(array.copy()).to(device))
-    return Initial_state(p,*tensors)
+        steps=tuple(Phase_step(**step) for step in json.loads(str(data["phase_steps"]))) if version==2 else ()
+        if ("phase" in data)!=bool(steps):
+            raise ValueError("Spectral snapshot phase and phase steps must be present together")
+        phase=None
+        if steps:
+            array=data["phase"]
+            if array.shape!=shape or array.dtype!=np.float32 or not np.isfinite(array).all():
+                raise ValueError("Invalid phase in spectral snapshot")
+            phase=torch.from_numpy(array.copy()).to(device)
+    return Initial_state(p,*tensors,phase,steps)

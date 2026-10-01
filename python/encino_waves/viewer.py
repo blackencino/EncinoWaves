@@ -12,7 +12,9 @@ from imgui_bundle import imgui, portable_file_dialogs as file_dialogs
 from rendercanvas.glfw import RenderCanvas, loop
 from wgpu.utils.imgui import ImguiRenderer
 import wgpu
-from .model import Wave_parameters, make_initial_state, evaluate
+from .model import Wave_parameters, Phase_step, evaluate
+from .editing import (make_wave_basis, state_from_basis, same_wave_basis,
+                      follow_parameters, preserve_phase, restore_phase)
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
 from .presets import SCENES, scene_with_resolution
 from .camera import frame_domain
@@ -32,7 +34,10 @@ class Viewer:
         self.selected_scene=preset
         initial_scene=scene_with_resolution(preset,resolution)
         self.parameters,self.camera,self.look=initial_scene.parameters,initial_scene.camera,initial_scene.look
-        self.state=make_initial_state(self.parameters,device)
+        self.basis=make_wave_basis(self.parameters,device)
+        self.state=state_from_basis(self.basis,self.parameters)
+        self.post_seed=True
+        self.reset_requested=False
         self.rendered_state=None
         self.rendered_comparison_state=None
         self.saved_shading=None
@@ -115,17 +120,40 @@ class Viewer:
         self.parameters,self.camera,self.look=scene.parameters,scene.camera,scene.look
         self.last_update=time.perf_counter()
         self.changed=True
+        self.reset_requested=True
 
     def _start_update(self):
-        parameters=self.parameters.tessendorf() if self.tessendorf_only else self.parameters
-        comparison=self.comparing
-        comparison_parameters=self.parameters.tessendorf()
-        def build():
-            state=make_initial_state(parameters,self.device_name)
-            other=make_initial_state(comparison_parameters,self.device_name) if comparison else None
-            return state,other
-        self.future=self.executor.submit(build)
-        self.changed=False
+        # Only lattice / random-basis edits need a CPU build. Physical controls
+        # feed the post-seed GPU stage on every displayed frame, without debounce.
+        self.future=self.executor.submit(make_wave_basis,self.parameters,self.device_name)
+
+    def _update_parameters(self,elapsed):
+        desired=self.parameters.tessendorf() if self.tessendorf_only else self.parameters
+        if not same_wave_basis(self.basis.parameters,desired):
+            if not self.future and time.perf_counter()-self.last_update>.2:
+                self._start_update()
+            return
+        if self.reset_requested:
+            self.state=state_from_basis(self.basis,desired)
+            self.comparison_state=None
+            self.post_seed=True
+            self.reset_requested=False
+        parameters=follow_parameters(self.state.parameters,desired,elapsed)
+        if parameters!=self.state.parameters:
+            target=state_from_basis(self.basis,parameters)
+            self.state=preserve_phase(self.state,target,self.time)
+            self.post_seed=True
+        if self.comparing:
+            parameters=self.state.parameters.tessendorf()
+            if self.comparison_state is None or self.comparison_state.parameters!=parameters:
+                self.comparison_state=state_from_basis(self.basis,parameters)
+            # Both panels use exactly the same travelling-wave phase history.
+            if self.comparison_state.phase is not self.state.phase:
+                self.comparison_state=replace(self.comparison_state,phase=self.state.phase,
+                                              phase_steps=self.state.phase_steps)
+        else:
+            self.comparison_state=None
+        self.changed=self.state.parameters!=desired
 
     def draw(self):
         now=time.perf_counter()
@@ -139,13 +167,16 @@ class Viewer:
         if self.playing: self.time+=delta*self.speed
         if self.future and self.future.done():
             try:
-                self.state,self.comparison_state=self.future.result()
+                basis=self.future.result()
+                # A newer grid edit can supersede a build in flight.
+                if same_wave_basis(basis.parameters,self.parameters):
+                    self.basis=basis
+                    self.reset_requested=True
                 self.message=""
             except Exception as error:
                 self.message=str(error)
             self.future=None
-        if self.changed and not self.future and now-self.last_update>.2:
-            self._start_update()
+        self._update_parameters(delta)
         if self.renderer.frame is None or self.rendered_state is not self.state or self.renderer.frame.time!=self.time:
             self.renderer.upload(evaluate(self.state,self.time))
             self.rendered_state=self.state
@@ -192,6 +223,8 @@ class Viewer:
         metadata={"parameters":asdict(self.state.parameters),"camera":asdict(self.camera),"look":asdict(self.look),
                   "requested_parameters":asdict(self.parameters),"tessendorf_only":self.tessendorf_only,
                   "time":self.time,"sky":str(Path(sky).resolve()) if Path(sky).is_file() else None,
+                  "post_seed":self.post_seed,
+                  "phase_steps":[asdict(step) for step in self.state.phase_steps],
                   "comparison":self.comparing,"shading_statistics":asdict(self.renderer.shading_statistics),
                   "comparison_shading_statistics":asdict(self.comparison_renderer.shading_statistics)
                       if self.comparing and self.comparison_renderer is not None else None}
@@ -207,13 +240,21 @@ class Viewer:
         self.tessendorf_only=saved.get("tessendorf_only",False)
         if saved.get("sky"): self.load_sky(saved["sky"])
         parameters=self.parameters.tessendorf() if self.tessendorf_only else self.parameters
-        self.state=make_initial_state(parameters,self.device_name)
+        self.basis=make_wave_basis(parameters,self.device_name)
+        self.post_seed=True
+        self.state=state_from_basis(self.basis,parameters)
+        self.state=restore_phase(self.basis,self.state,(Phase_step(**step) for step in saved.get("phase_steps",())))
         # A queued build may finish, but must not replace an explicitly opened scene.
         self.future=None
-        self.comparison_state=make_initial_state(self.parameters.tessendorf(),self.device_name) if self.comparing else None
+        self.comparison_state=None
+        if self.comparing:
+            p=parameters.tessendorf()
+            other=state_from_basis(self.basis,p)
+            self.comparison_state=replace(other,phase=self.state.phase,phase_steps=self.state.phase_steps)
         self.saved_shading=Shading_statistics(**saved["shading_statistics"]) if saved.get("shading_statistics") else None
         self.saved_comparison_shading=Shading_statistics(**saved["comparison_shading_statistics"]) if saved.get("comparison_shading_statistics") else None
         self.changed=False
+        self.reset_requested=False
         self.message=f"Loaded {Path(path).name}"
 
     def load_sky(self,path):
@@ -352,9 +393,9 @@ class Viewer:
         changed,index=imgui.combo("##scene",self.selected_scene,[s.name for s in SCENES])
         if changed: self.select_scene(index)
         imgui.spacing()
-        self._slider("Wind speed","wind_speed",1,500,"%.1f m/s","Wind speed at 10 m. Typical scenes use 1–40 m/s; the original extended range is retained.",True)
+        self._slider("Wind speed","wind_speed",1,500,"%.1f m/s","Wind speed at 10 m. Edits reshape the existing waves continuously.",True)
         self._slider("Fetch","fetch_km",1,5000,"%.0f km","How far the wind has had to build the sea.",True)
-        self._slider("Ocean depth","depth",.25,1000,"%.1f m","Shallow water reshapes the wave spectrum.",True)
+        self._slider("Ocean depth","depth",.25,1000,"%.1f m","Depth changes the wave spectrum and speed while preserving travelling-wave phase.",True)
         self._slider("Swell","swell",-1,2,"%.2f","0: empirical spreading; positive: narrower swell; -1: all directions equally.")
         self._slider("Wind direction","wind_direction",-180,180,"%.0f degrees","Rotate the wind while keeping the camera fixed.")
         imgui.text("Directional spreading")
@@ -425,7 +466,8 @@ class Viewer:
             imgui.begin_disabled(self.movie_process is not None or self.future is not None or self.changed)
             if imgui.button("Export 1080p movie..."): self._open_file("movie")
             imgui.end_disabled()
-        if self.future or self.changed: self._label("Updating the sea...",14,(.91,.76,.48,1))
+        if self.future: self._label("Building wave grid...",14,(.91,.76,.48,1))
+        elif self.changed: self._label("Adjusting the sea...",14,(.91,.76,.48,1))
         if self.message: imgui.text_wrapped(self.message)
         imgui.end()
         imgui.set_next_window_pos((20,height-42))

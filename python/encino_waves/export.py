@@ -11,7 +11,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import imageio_ffmpeg
 import wgpu
-from .model import Wave_parameters, make_initial_state, evaluate
+from .model import Wave_parameters, Phase_step, make_initial_state, evaluate
+from .editing import make_edited_state
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics, read_rgba
 from .camera import frame_domain
 
@@ -28,6 +29,8 @@ class Shot:
     start_time: float = 10.0
     shading_statistics: Shading_statistics | None = None
     comparison_shading_statistics: Shading_statistics | None = None
+    post_seed: bool = False
+    phase_steps: tuple[Phase_step, ...] = ()
 
 
 def academy_shots(resolution=2048):
@@ -134,8 +137,12 @@ def render_shots(shots,output,*,sky=None,device="auto",width=1920,height=1080,fp
     try:
         for index,shot in enumerate(shots):
             progress(f"Shot {index+1}/{len(shots)}: {shot.title}",flush=True)
-            state=make_initial_state(shot.parameters,device)
-            other=make_initial_state(shot.parameters.tessendorf(),device) if shot.comparison else None
+            if shot.post_seed or shot.phase_steps:
+                state=make_edited_state(shot.parameters,device,shot.phase_steps)
+                other=make_edited_state(shot.parameters.tessendorf(),device,shot.phase_steps) if shot.comparison else None
+            else:
+                state=make_initial_state(shot.parameters,device)
+                other=make_initial_state(shot.parameters.tessendorf(),device) if shot.comparison else None
             if other and comparison_renderer is None:
                 comparison_renderer=Ocean_renderer(graphics,sky,mesh_resolution=(960,576))
             camera=shot.camera or frame_domain(shot.parameters.domain)

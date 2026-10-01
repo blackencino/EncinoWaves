@@ -1,9 +1,10 @@
 # Copyright 2015-2026 Christopher Jon Horvath. Apache-2.0.
 """Functional spectral ocean model; equation numbers refer to Horvath (2015).
 
-Setup is evaluated in float64 on the CPU, once per parameter change. All
+make_initial_state is the float64 CPU reference setup. The editing module
+separates the seed from GPU spectral evaluation for continuous controls. All
 per-frame work, including six batched inverse FFTs, runs on the selected GPU.
-No autograd, simulation history, amplitude normalization, or hidden wave layers.
+No autograd, hidden evaluation history, amplitude normalization, or extra layers.
 """
 from dataclasses import dataclass, replace
 import math
@@ -212,12 +213,38 @@ def random_variates(kx, ky, seed):
 
 
 @dataclass(frozen=True)
+class Phase_step:
+    """An outgoing dispersion segment, ending at an absolute animation time."""
+    time: float
+    depth: float
+    gravity: float
+    surface_tension: float
+    density: float
+    dispersion: str
+
+    def __post_init__(self):
+        if not math.isfinite(self.time):
+            raise ValueError("phase step time must be finite")
+        # Share physical validation with the static model.
+        Wave_parameters(depth=self.depth, gravity=self.gravity,
+                        surface_tension=self.surface_tension, density=self.density,
+                        dispersion=self.dispersion)
+
+    @classmethod
+    def from_parameters(cls, parameters, time):
+        return cls(time, *(getattr(parameters, name) for name in
+                   ("depth", "gravity", "surface_tension", "density", "dispersion")))
+
+
+@dataclass(frozen=True)
 class Initial_state:
     parameters: Wave_parameters
     h_positive: torch.Tensor
     h_negative: torch.Tensor
     omega: torch.Tensor
     multipliers: torch.Tensor
+    phase: torch.Tensor | None = None
+    phase_steps: tuple[Phase_step, ...] = ()
 
     @property
     def device(self):
@@ -277,10 +304,17 @@ def make_initial_state(parameters=Wave_parameters(), device="auto"):
 
 
 @torch.inference_mode()
-def spectral_height(state, time):
+def phase_at(state, time):
     if not math.isfinite(time):
         raise ValueError("time must be finite")
-    phase = state.omega * time
+    if state.phase is None:
+        return state.omega * time
+    return state.phase + state.omega * (time - state.phase_steps[-1].time)
+
+
+@torch.inference_mode()
+def spectral_height(state, time):
+    phase = phase_at(state, time)
     rotation = torch.complex(torch.cos(phase), torch.sin(phase))
     return state.h_positive*rotation.conj() + state.h_negative*rotation
 

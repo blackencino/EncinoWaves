@@ -28,10 +28,20 @@ try:
     viewer.on_key({'key':'f'})
     np.testing.assert_allclose(viewer.camera.eye,before.eye,atol=1e-10)
     viewer.on_key({'key':'c'})
-    viewer._start_update()
-    viewer.future.result(timeout=30)
     pixels = np.asarray(canvas.draw())
     assert viewer.comparison_state is not None
+    basis = viewer.basis
+    viewer.edit_parameters(wind_speed=24,depth=8)
+    for i in range(90):
+        viewer.time += 1/60
+        viewer._update_parameters(1/60)
+    assert viewer.basis is basis
+    assert viewer.future is None and not viewer.changed
+    assert viewer.state.parameters.wind_speed == 24
+    assert viewer.state.parameters.depth == 8
+    assert viewer.state.phase_steps
+    assert viewer.comparison_state.phase is viewer.state.phase
+    pixels = np.asarray(canvas.draw())
     Image.fromarray(pixels).save('renders/viewer_comparison.png')
     viewer.save_scene('renders/viewer_roundtrip.json')
     before = viewer.renderer.render_image(480,270,viewer.camera,viewer.look,left_renderer=viewer.comparison_renderer)
@@ -46,7 +56,7 @@ try:
         return original_header(label)
     imgui.collapsing_header = expanded_header
     canvas.draw()
-    print('Viewer UI, Maya events, scene round-trip, comparison, and all panels passed',flush=True)
+    print('Viewer UI, live wind/depth edits, phase replay, Maya events, comparison, and all panels passed',flush=True)
 finally:
     viewer.executor.shutdown(wait=True,cancel_futures=True)
     canvas.close()

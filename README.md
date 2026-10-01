@@ -36,6 +36,12 @@ seconds, m/s, and kilometres of fetch. The original extended slider ranges are
 retained; the extreme wind settings are artist controls, not a claim that the
 empirical data validates every such condition. Ctrl-click a slider to enter a value.
 
+Wind, fetch, depth, swell and direction edit continuously on the GPU. They reuse
+the seeded wave components; depth edits also preserve their accumulated phase.
+The controls have a short, 0.1-second response to smooth pointer motion. Domain,
+resolution and seed changes build a new wave basis. Space pauses propagation
+while leaving these controls live.
+
 The camera preserves the original Z-up Maya center-of-interest model:
 
 | Input | Action |
@@ -74,7 +80,8 @@ the original framing rule and is well above the surface.
 
 ### Scenes, stills and movies
 
-Save still also writes the physical parameters, camera, light settings and time.
+Save still also writes the physical parameters, camera, light settings, time and
+the phase segments needed to reproduce depth edits at any export resolution.
 Reopen that JSON through **Files & export → Open scene**, or use it from the CLI.
 The same panel exports a deterministic 1080p movie, with frame times independent
 of playback speed. Movie exports run in a separate process; progress is in
@@ -119,11 +126,31 @@ frame = evaluate(state, 12.0)
 Parameters and state records are frozen values. Evaluation does not mutate its
 inputs; tensor members are read-only by contract.
 
+For live controls, keep the seeded basis and evaluate the per-wavenumber spectrum
+downstream of it:
+
+```python
+from dataclasses import replace
+from encino_waves import make_wave_basis, state_from_basis, preserve_phase
+
+basis = make_wave_basis(parameters, "auto")  # once for this grid and seed
+state = state_from_basis(basis, parameters)  # spectrum + dispersion on the GPU
+edited = replace(parameters, wind_speed=24, depth=8)
+target = state_from_basis(basis, edited)
+state = preserve_phase(state, target, time=12.0)
+frame = evaluate(state, 12.0)
+```
+
+`preserve_phase` returns a new value; subsequent evaluations remain independent
+of call order. The saved phase segments reproduce the current edited sea. They
+are not a keyframed recording of the parameter controls.
+
 ```sh
 .venv/bin/python -m encino_waves doctor
 .venv/bin/python -m pytest -q
 .venv/bin/python tools/viewer_smoke.py
 .venv/bin/python -m encino_waves benchmark --resolution 4096 --frames 30
+.venv/bin/python tools/benchmark_editing.py --resolution 1024 --frames 30
 ```
 
 On the NVIDIA workstation, use the corresponding virtual environment Python and

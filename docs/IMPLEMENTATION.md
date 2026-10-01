@@ -48,15 +48,68 @@ new displacement and normal tensors without changing the state. Time is absolute
 seeking backwards or exporting frames out of order gives the same result.
 Tensor members are read-only by API contract; PyTorch has no const tensor type.
 
-Setup currently runs on CPU in float64 and transfers the initial state once.
-Per-frame propagation, six inverse FFTs, crest extraction, and displaced-surface
-normals run on the selected GPU. The two signs of travelling waves have separate
-random amplitudes and phases, as required by section 7.1.2 of the paper.
+`make_initial_state` retains the float64 CPU reference setup. The viewer uses
+`make_wave_basis` followed by `state_from_basis`: CPU setup fixes the lattice and
+random variates once; the paper's spectrum, directional spreading, normalization,
+and dispersion are then evaluated on the Torch GPU. This post-seed stage feeds
+propagation, six inverse FFTs, crest extraction and displaced-surface normals.
+The two signs of travelling waves have separate random amplitudes and phases,
+as required by section 7.1.2 of the paper.
 
 No extra wave layers, procedural surface noise, amplitude fitting, or band-pass
 filters are added to the ocean. Domain size is in metres, fetch in kilometres,
 wind in m/s, depth in metres. The domain is a periodic patch. Resolution changes
 preserve the random variates at shared wavenumbers.
+
+## Continuous parameter editing
+
+Wind speed, fetch, depth, swell and direction do not require new random variates.
+They change the per-wavenumber spectrum after the seed stage. The basis caches
+random complex factors, geometry, derivative multipliers and a mapping from each
+mode to its distinct radial wavenumber. Isotropic quantities and directional
+normalization are evaluated once per distinct radius, then gathered onto the
+full spectral grid. This is an exact grouping, not a sampled/interpolated lookup.
+The 64-point Gauss integral uses even symmetry to evaluate 32 paired samples;
+scratch memory is bounded by chunking the radial grid. The live path uses float32
+and is checked against the float64 reference across all spreading models,
+equation conventions and the viewer's parameter extremes.
+
+Wind edits change amplitudes but leave dispersion unchanged. Depth edits change
+both the spectrum (including its frequency-to-wavenumber Jacobian) and dispersion.
+Substituting a new frequency in `omega * absolute_time` would restart each mode's
+phase. Instead, `preserve_phase(previous, target, edit_time)` retains the phase at
+that instant and propagates subsequently with the new frequency. Its inputs are
+not mutated. Editing a paused sea changes its spectrum without advancing phase.
+
+Each outgoing dispersion segment is recorded as a small immutable `Phase_step`.
+Scene JSON stores these segments and replays only radial dispersion on load,
+including when exporting at a higher resolution. NPZ snapshots also store the
+phase tensor losslessly. The current edited state can be evaluated at any time
+in any order; seeking does not undo parameter edits or replay a parameter movie.
+Both comparison panels share the same phase history.
+
+The viewer follows numeric controls with a 0.1-second exponential response and
+evaluates the actual physical parameters at every step, without crossfading wave
+fields or interpolating spectral amplitudes. Once settled it stops recomputing
+the spectrum. Domain, resolution and seed edits rebuild the basis in a worker;
+other edits have no CPU-build debounce. Presets deliberately start a fresh state.
+These are artist transitions between equilibrium spectra. The paper does not
+specify transient wind growth, changing bathymetry, or a time-varying-depth fluid
+solver; this extension makes no such physical claim.
+
+On this M2 Max, synchronized warm edits of wind and depth together, with
+rendering omitted (30 samples at 1024/2048, 20 at 4096):
+
+| Resolution | One-time basis | Spectrum + phase edit | Propagation, FFTs, normals |
+| --- | --- | --- | --- |
+| 1024² | 0.14 s | 2.30 ms median / 2.45 ms p95 | 4.77 ms median |
+| 2048² | 0.38 s | 6.66 ms median / 7.12 ms p95 | 18.75 ms median |
+| 4096² | 1.51 s | 27.01 ms median / 27.72 ms p95 | 77.90 ms median |
+
+These exclude texture transfers, graphics and UI. Run
+`python tools/benchmark_editing.py --resolution 1024 --device mps` (or `cuda`)
+to measure the editing path separately from the static reference setup above.
+CUDA uses the same tensor operations; NVIDIA hardware remains untested here.
 
 ## Paper and historical implementations
 
