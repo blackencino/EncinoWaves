@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "encino-waves"
+version = "0.2.0"
+description = "Empirical directional ocean waves, on Metal and CUDA"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "numpy>=2.0,<3", "scipy>=1.14,<2", "torch>=2.14,<2.15",
+    "wgpu==0.32.0", "rendercanvas==2.7.2", "glfw>=2.10,<3",
+    "imgui-bundle==1.92.601", "pillow>=11,<13",
+    "imageio-ffmpeg>=0.6,<0.7", "OpenImageIO>=3.1,<3.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pyfftw>=0.15"]
+
+[project.scripts]
+encino-waves = "encino_waves.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+encino_waves = ["shaders/*.wgsl"]
+
+[tool.pytest.ini_options]
+pythonpath = ["python"]
+testpaths = ["tests"]

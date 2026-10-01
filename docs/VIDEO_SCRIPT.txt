@@ -1,0 +1,75 @@
+ENCINO WAVES — FIVE-MINUTE PRESENTATION DRAFT
+Christopher J. Horvath
+
+This is a narration and shot plan for review. It makes no claim about particular
+films, adoption counts, production savings, or award status. Add specific credited
+production examples only where you want them and can substantiate them.
+The generated movie has captions and no recorded narration or music.
+
+0:00–0:20 | OPENING
+[Open ocean. Let the image hold before speaking.]
+An ocean has a character. It can feel restless, quiet, powerful, or distant.
+For a visual effects artist, that character has to serve a shot. Encino Waves
+is a way to shape it with a small set of controls tied to the physical world.
+
+0:20–0:45 | THE STARTING POINT
+[Matched earlier-model / Encino comparison.]
+This work builds on the ocean method introduced to computer graphics by
+Jerry Tessendorf. That method gave artists an extraordinary starting point.
+But getting a particular sea often meant balancing additional layers and
+adjustments by eye. My work brings measured descriptions of real oceans
+into that process, so the basic controls do more of the work.
+
+0:45–1:30 | WIND SPEED
+[5, 17, then 30 metres per second. Same camera and lighting.]
+Start with wind speed. A light wind gives us a much quieter surface.
+Increase the wind and the waves grow. Increase it further and the water
+becomes more energetic. We are changing one physical description of the
+scene, rather than independently sculpting every size of wave.
+[Leave room for the motion to be seen.]
+
+1:30–2:15 | FETCH
+[20, 300, then 1,250 kilometres.]
+Wind speed is only part of the story. The wind also needs room to build waves.
+That distance is called fetch. A wind blowing across a short stretch of water
+produces a different sea from the same wind blowing across a much longer
+stretch. This gives an artist a useful way to change the character of the
+water while keeping the controls connected to a physical idea.
+
+2:15–2:35 | DIRECTIONAL SPREADING
+[Matched comparison, with empirical spreading selected.]
+Real waves do not all travel in exactly the same direction. Different sizes
+of wave spread differently. Bringing that behavior into the model changes
+the organization of the surface and the way its shapes move through a shot.
+
+2:35–3:15 | SWELL
+[Swell zero, then one.]
+A local wind can make a choppy, irregular sea. Waves travelling from a distant
+weather system can arrive as long, parallel swells. The swell control provides
+a direct way to move between those appearances. The artist can explore that
+range without managing a collection of hidden adjustments.
+
+3:15–3:45 | DEPTH
+[150 metres, then 5 metres.]
+Depth matters too. The same wind over shallow water produces a different mix
+of waves. Here the model responds to the depth itself. This is a description
+of the open surface; breaking surf and interaction with a shoreline remain
+separate parts of a production workflow.
+
+3:45–4:25 | RANGE
+[Light wind, then storm. Give each image time.]
+These are different conditions produced by the same model: a light breeze
+and a strong storm. The point is the range an artist can reach through
+controls that are understandable and repeatable.
+
+4:25–4:40 | THE TOOL
+[Show the controls briefly in an optional separately recorded viewer insert.]
+Wind speed. Fetch. Directional spreading. Swell. Depth. Each has a clear role.
+The artist can make a choice, see the result, and return to exactly the same
+state later.
+
+4:40–5:00 | CLOSE
+[Hold on the ocean.]
+The aim of Encino Waves is to make physically grounded oceans practical to
+art-direct. The research is in the model. The value to the artist is in the
+image, and in how directly they can reach the ocean a shot needs.
