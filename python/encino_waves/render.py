@@ -154,14 +154,15 @@ class Ocean_renderer:
             ])
         for texture,data in zip(self.wave_textures,maps):
             self._write_texture(texture,data)
-        if self.statistics_parameters != frame.parameters:
+        parameters = frame.parameters.in_ocean_space()
+        if self.statistics_parameters != parameters:
             # Original viewer takes these statistics once after initialization.
             height=maps[0][...,2].astype(np.float32)
             crest=maps[0][...,3].astype(np.float32)
             self.big_height=max(.001,1.5*float(np.max(np.abs(height))))
             self.crest_gain=1/max(1e-8,2*float(np.std(crest)))
             self.crest_bias=-float(np.mean(crest))*self.crest_gain
-            self.statistics_parameters=frame.parameters
+            self.statistics_parameters=parameters
         self.frame = frame
         self.mips_dirty = True
 
@@ -184,6 +185,7 @@ class Ocean_renderer:
         forward,right,up = camera.basis()
         aspect = (viewport[2]/viewport[3]) if viewport else width/height
         rotation = math.radians(look.sky_rotation)
+        ocean_rotation = math.radians(self.frame.parameters.wind_direction % 360)
         sx,sy,sz = self.sun_direction
         sun = (sx*math.cos(rotation)+sy*math.sin(rotation),sy*math.cos(rotation)-sx*math.sin(rotation),sz)
         uniform = np.array([
@@ -191,7 +193,7 @@ class Ocean_renderer:
             [*forward,math.tan(math.radians(camera.fov)/2)],
             [*right,aspect],[*up,look.exposure],
             [self.frame.parameters.domain,self.wave_size,look.crest_threshold,look.foam],
-            [rotation,look.haze,look.sky_gain*self.sky_storage_scale,0],[*sun,0],[*(self.sun_color*look.sky_gain),0],
+            [rotation,look.haze,look.sky_gain*self.sky_storage_scale,ocean_rotation],[*sun,0],[*(self.sun_color*look.sky_gain),0],
             [*self.mesh_resolution,.5,30000],
             [self.big_height,self.crest_gain,self.crest_bias,look.crest_maximum],
             [*(self.moon_color*look.sky_gain),0],

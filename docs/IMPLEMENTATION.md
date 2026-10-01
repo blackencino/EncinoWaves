@@ -63,7 +63,7 @@ preserve the random variates at shared wavenumbers.
 
 ## Continuous parameter editing
 
-Wind speed, fetch, depth, swell and direction do not require new random variates.
+Wind speed, fetch, depth and swell do not require new random variates.
 They change the per-wavenumber spectrum after the seed stage. The basis caches
 random complex factors, geometry, derivative multipliers and a mapping from each
 mode to its distinct radial wavenumber. Isotropic quantities and directional
@@ -74,7 +74,7 @@ scratch memory is bounded by chunking the radial grid. The live path uses float3
 and is checked against the float64 reference across all spreading models,
 equation conventions and the viewer's parameter extremes.
 
-Wind edits change amplitudes but leave dispersion unchanged. Depth edits change
+Wind speed edits change amplitudes but leave dispersion unchanged. Depth edits change
 both the spectrum (including its frequency-to-wavenumber Jacobian) and dispersion.
 Substituting a new frequency in `omega * absolute_time` would restart each mode's
 phase. Instead, `preserve_phase(previous, target, edit_time)` retains the phase at
@@ -96,6 +96,32 @@ other edits have no CPU-build debounce. Presets deliberately start a fresh state
 These are artist transitions between equilibrium spectra. The paper does not
 specify transient wind growth, changing bathymetry, or a time-varying-depth fluid
 solver; this extension makes no such physical claim.
+
+Wind direction is a mesh transform, following the original `Parameters.h`
+contract: synthesize wind along +X and place the field externally. Positive
+angles rotate +X towards +Y about world Z. The first Python viewer instead
+subtracted this angle inside directional spreading. That reweighted different
+random samples on the fixed Fourier lattice and changed the particular sea;
+it was not a rigid rotation and was not an FFTW-versus-Torch difference.
+
+`Wave_frame` maps stay in ocean space. For a rotation R, the renderer samples at
+`q = inverse(R) * world_xy`, rotates horizontal displacement and normals by R,
+and leaves height and crest scalars unchanged. The view-adaptive grid remains
+camera-aligned, covering the view at every ocean orientation. Camera and sky
+stay fixed when the artist rotates the ocean. Direction-only edits reuse all
+spectral tensors, phase history and shading statistics; while paused they also
+reuse the FFT results and GPU textures. Both comparison panels and exports use
+the same transform. A core consumer using `texture_arrays` must apply the frame's
+`parameters.wind_direction` when placing its mesh or texture reference frame.
+
+New NPZ snapshots use version 3 to record this placement convention. Versions
+1 and 2 already baked direction into their stored coefficients: loading them
+preserves those fields exactly and applies no additional mesh rotation. Scene
+JSON reconstructs the spectrum and uses the corrected rotation behavior.
+
+The half-angle spreading factor uses the equivalent sine expression so it is
+exactly zero at +/- pi. This avoids amplifying the rounding error in float32
+`cos(pi/2)` when the spreading exponent is small, and matches the float64 path.
 
 On this M2 Max, synchronized warm edits of wind and depth together, with
 rendering omitted (30 samples at 1024/2048, 20 at 4096):
@@ -201,10 +227,16 @@ distance made the original fog obscure the shot.
 ## Verification limits
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
-exercised locally. On September 30, 2026 the numerical suite passed 60 checks
-with eleven CUDA-only skips. The UI check exercises camera events, continuous
+exercised locally. On September 30, 2026 the numerical suite passed 71 checks
+with sixteen CUDA-only skips. The UI check exercises camera events, continuous
 wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
-panels, including with the supplied Dutch Skies HDR. The desktop window was reported as occluded
+panels, including with the supplied Dutch Skies HDR. Direction edits preserve
+the exact spectral coefficients across all four spreading models. The UI test
+also forbids spectrum and FFT evaluation during a paused direction edit. Rotating
+mesh, camera and environment together reproduces the original rendered image
+within 0.003 mean 8-bit channel levels for both comparison seas. Saved rotated
+scenes round-trip pixel-exactly and export through the movie renderer.
+The desktop window was reported as occluded
 by macOS during the final check; live mouse interaction still needs an unlocked,
 visible desktop. The window cancels before computing when occluded.
 

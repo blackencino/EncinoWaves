@@ -5,7 +5,7 @@ struct Uniforms {
     right_aspect: vec4f,
     up_exposure: vec4f,
     ocean: vec4f,        // domain, resolution, crest threshold, foam amount
-    environment: vec4f,  // sky rotation, haze, sky gain, unused
+    environment: vec4f,  // sky rotation, haze, sky gain, ocean rotation
     sun: vec4f,
     sun_color: vec4f,
     grid: vec4f,         // x segments, y segments, near distance, far distance
@@ -19,6 +19,16 @@ struct Uniforms {
 @group(0) @binding(4) var sky_sampler: sampler;
 @group(0) @binding(5) var sky_texture: texture_2d<f32>;
 const pi: f32 = 3.141592653589793;
+
+fn rotate_xy(v: vec2f, angle: f32) -> vec2f {
+    let c = cos(angle);
+    let s = sin(angle);
+    return vec2f(c*v.x-s*v.y,s*v.x+c*v.y);
+}
+
+fn ocean_to_world(v: vec3f) -> vec3f {
+    return vec3f(rotate_xy(v.xy,u.environment.w),v.z);
+}
 
 fn environment(direction: vec3f, level: f32) -> vec3f {
     let d = normalize(direction);
@@ -62,12 +72,14 @@ struct Ocean_vertex {
     let ahead = normalize(vec2f(u.forward_fov.x,u.forward_fov.y));
     let side = u.right_aspect.xy;
     let base = u.eye_time.xy + distance*(ahead + lateral*side*u.forward_fov.w*u.right_aspect.w*1.8);
-    let uv = base/u.ocean.x;
+    // The view-adaptive grid is in world space. Its inverse-transformed base
+    // samples the unchanged +X ocean; rotate displaced points back to the world.
+    let uv = rotate_xy(base,-u.environment.w)/u.ocean.x;
     let texel_world = u.ocean.x/u.ocean.y;
     let footprint = distance*(2.0*u.forward_fov.w*u.right_aspect.w/u.grid.x);
     let lod = max(0.0,log2(max(footprint/texel_world,1.0))-.6);
     let disp = textureSampleLevel(displacements,wave_sampler,uv,lod).xyz;
-    let world = vec3f(base,0.0)+disp;
+    let world = vec3f(base,0.0)+ocean_to_world(disp);
     let view = world-u.eye_time.xyz;
     let z = dot(view,u.forward_fov.xyz);
     let clip = vec4f(dot(view,u.right_aspect.xyz)/(u.forward_fov.w*u.right_aspect.w),
@@ -141,7 +153,7 @@ fn layered_fog(color: vec3f, distance: f32, incident: vec3f) -> vec3f {
 }
 @fragment fn ocean_fragment(in: Ocean_vertex) -> @location(0) vec4f {
     let incident=normalize(in.world-u.eye_time.xyz);
-    let normal=normalize(textureSample(normals,wave_sampler,in.uv).xyz);
+    let normal=normalize(ocean_to_world(textureSample(normals,wave_sampler,in.uv).xyz));
     let refracted=my_refract(incident,normal);
     var reflection=refracted.reflection;
     reflection.z=abs(reflection.z);

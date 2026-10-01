@@ -111,7 +111,8 @@ def _product(p, angle, beta, bias):
         # Exact zero at the endpoints avoids a spurious reverse-going wave from
         # float32 cos(pi/2), which is about -4e-8 rather than zero.
         base = torch.where(torch.abs(angle) < math.pi/2, torch.cos(angle)**2, 0)
-    return base*torch.abs(torch.cos(angle/2))**(2*bias)
+    half_cos = torch.abs(torch.sin((math.pi-torch.abs(angle))/2))
+    return base*half_cos**(2*bias)
 
 
 def _product_normalization(p, beta, bias, quadrature):
@@ -148,12 +149,8 @@ def state_from_basis(basis, parameters):
     ratio = omega.clamp_min(1e-12)/peak_omega(p, directional=True)
     coefficient = 16 if p.convention == "paper" else 16.1
     bias = coefficient*torch.tanh(1/ratio)*max(0.0, p.swell)**2
-    direction = math.radians((p.wind_direction+180)%360-180)
-    theta = basis.angle-direction
-    # Leave angles already in range untouched. Adding and subtracting pi would
-    # lose a bit at +/- pi/2 and leak energy across the cosine-squared boundary.
-    theta = torch.where(theta > math.pi, theta-2*math.pi,
-                        torch.where(theta < -math.pi, theta+2*math.pi, theta))
+    # Wind direction places the mesh; the seeded ocean always has +X wind.
+    theta = basis.angle
     opposite = torch.where(theta < 0, theta+math.pi, theta-math.pi)
     if p.spreading in ("hasselmann", "mitsuyasu"):
         u_over_c = p.wind_speed*peak_omega(p, directional=True)/p.gravity
@@ -166,7 +163,8 @@ def state_from_basis(basis, parameters):
         # Duplication identity avoids cancellation between large lgamma terms.
         log_q = torch.lgamma(shape+1)-torch.lgamma(shape+.5)-math.log(2*math.sqrt(math.pi))
         def directional(angle):
-            return torch.exp(log_q[index]+2*shape[index]*torch.log(torch.abs(torch.cos(angle/2)).clamp_min(1e-30)))
+            half_cos = torch.abs(torch.sin((math.pi-torch.abs(angle))/2))
+            return torch.exp(log_q[index])*half_cos**(2*shape[index])
     else:
         beta = torch.where(ratio < .95, 2.61*ratio**1.3,
                torch.where(ratio < 1.6, 2.28*ratio**-1.3,
@@ -188,6 +186,13 @@ def _same_dispersion(a, b):
         return (p.gravity, None if p.dispersion == "deep" else p.depth,
                 p.surface_tension/p.density if p.dispersion == "capillary" else 0)
     return key(a) == key(b)
+
+
+def edit_state(basis, previous, parameters, time):
+    """Retain the wave tensors for mesh rotation; retune other edits in phase."""
+    if parameters.in_ocean_space() == previous.parameters.in_ocean_space():
+        return replace(previous, parameters=parameters)
+    return preserve_phase(previous, state_from_basis(basis, parameters), time)
 
 
 @torch.inference_mode()

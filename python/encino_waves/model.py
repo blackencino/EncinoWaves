@@ -24,7 +24,7 @@ class Wave_parameters:
     spreading: str = "donelan_banner"
     spectrum: str = "tma"
     dispersion: str = "capillary"
-    wind_direction: float = 0.0  # degrees
+    wind_direction: float = 0.0  # mesh rotation in degrees, +X towards +Y about Z
     gravity: float = 9.81
     surface_tension: float = 0.074
     density: float = 1000.0
@@ -64,6 +64,10 @@ class Wave_parameters:
         # The requested comparison: PM + positive cosine squared, no swell.
         # Keep dispersion, seed, gain, camera and shading matched.
         return replace(self, spectrum="pm", spreading="cosine_squared", swell=0.0)
+
+    def in_ocean_space(self):
+        """The original +X simulation, before placing its mesh in the world."""
+        return replace(self, wind_direction=0.0)
 
 
 def select_device(requested="auto"):
@@ -147,7 +151,10 @@ def spreading_at(p, omega, theta):
         shape = shape + bias
         # Log form of eq. 34: no overflowing gamma or power-of-two factors.
         log_q = (2*shape-1)*math.log(2) - math.log(math.pi) + 2*gammaln(shape+1)-gammaln(2*shape+1)
-        result = np.exp(log_q + 2*shape*np.log(np.maximum(np.abs(np.cos(theta/2)), 1e-30)))
+        # Equivalent to abs(cos(theta/2)), but exactly zero at +/- pi.
+        # Small exponents otherwise amplify float32/float64 endpoint error.
+        half_cos = np.abs(np.sin((math.pi-np.abs(theta))/2))
+        result = np.exp(log_q)*half_cos**(2*shape)
     else:
         if p.spreading == "donelan_banner":
             beta = np.where(ratio < .95, 2.61*ratio**1.3,
@@ -159,7 +166,7 @@ def spreading_at(p, omega, theta):
             def base(angle):
                 return np.where(np.abs(angle) <= math.pi/2, np.cos(angle)**2, 0.0)
         def product(angle):
-            return base(angle) * np.abs(np.cos(angle/2))**(2*bias)
+            return base(angle) * np.abs(np.sin((math.pi-np.abs(angle))/2))**(2*bias)
         if p.convention != "paper":
             # Preserve the published code's 36-segment half-circle integral.
             angles = np.linspace(-math.pi/2, math.pi/2, 37)
@@ -253,6 +260,11 @@ class Initial_state:
 
 @dataclass(frozen=True)
 class Wave_frame:
+    """Periodic maps in ocean space; rotate the mesh by parameters.wind_direction.
+
+    Horizontal displacements and normals rotate with the mesh. Heights and
+    crest values are scalars. The sampled tile itself stays in its +X frame.
+    """
     parameters: Wave_parameters
     time: float
     displacement: torch.Tensor  # [y,x,4]: dx,dy,height,negative minimum eigenvalue
@@ -274,14 +286,15 @@ def make_initial_state(parameters=Wave_parameters(), device="auto"):
     j = np.arange(n)
     # Matches the C++ iterator, including its positive Nyquist row.
     ky_all = np.where(j <= n//2, j, j-n)*dk
-    direction = math.radians(p.wind_direction)
     for row in range(0, n, 64):
         section = slice(row, min(row+64, n))
         ky = ky_all[section, None]
         k = np.hypot(kx, ky)
         safe_k = np.maximum(k, 1e-12)
         omega, derivative = dispersion_at(p, k)
-        theta = np.arctan2(-ky, kx)-direction
+        # Parameters.h explicitly assumes +X wind and an external transform.
+        # Rotating spectral weights against fixed noise changes the realization.
+        theta = np.arctan2(-ky, kx)
         theta = (theta+math.pi) % (2*math.pi)-math.pi
         opposite = (theta+2*math.pi) % (2*math.pi)-math.pi
         energy = spectrum_at(p, omega)*dk*dk*derivative/safe_k

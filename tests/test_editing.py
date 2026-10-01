@@ -4,7 +4,7 @@ import pytest
 import torch
 from encino_waves.model import Wave_parameters, make_initial_state, phase_at, evaluate
 from encino_waves.editing import (make_wave_basis, state_from_basis, preserve_phase,
-                                  restore_phase, follow_parameters, make_edited_state)
+                                  restore_phase, follow_parameters, make_edited_state, edit_state)
 from encino_waves.state_io import save_initial_state, load_initial_state
 
 
@@ -76,6 +76,34 @@ def test_depth_does_not_change_phase_in_deep_water_mode(basis):
     b = preserve_phase(a,state_from_basis(basis,replace(p,depth=2)),137)
     assert b.phase is None and not b.phase_steps
     torch.testing.assert_close(phase_at(a,137),phase_at(b,137),atol=0,rtol=0)
+
+
+@pytest.mark.parametrize("spreading", ("donelan_banner", "hasselmann", "mitsuyasu", "cosine_squared"))
+def test_direction_leaves_the_seeded_ocean_unchanged(basis, spreading):
+    p = replace(basis.parameters, spreading=spreading)
+    original = state_from_basis(basis, p)
+    reference = make_initial_state(p, "cpu")
+    for angle in (37, 90, 180, -90, 360):
+        rotated = replace(p, wind_direction=angle)
+        for a, b in ((original, state_from_basis(basis, rotated)),
+                     (reference, make_initial_state(rotated, "cpu"))):
+            for name in ("h_positive", "h_negative", "omega", "multipliers"):
+                torch.testing.assert_close(getattr(a, name), getattr(b, name), atol=0, rtol=0)
+
+
+def test_direction_edits_preserve_tensors_and_phase_history(basis):
+    original = state_from_basis(basis, basis.parameters)
+    original = edit_state(basis, original, replace(original.parameters, depth=3), 17)
+    assert original.phase_steps
+    frame = evaluate(original, 20)
+    for angle in (37, 179, -179, 360):
+        rotated = edit_state(basis, original, replace(original.parameters, wind_direction=angle), 20)
+        for name in ("h_positive", "h_negative", "omega", "multipliers", "phase", "phase_steps"):
+            assert getattr(rotated, name) is getattr(original, name)
+        other = evaluate(rotated, 20)
+        torch.testing.assert_close(other.displacement, frame.displacement, atol=0, rtol=0)
+        torch.testing.assert_close(other.normal, frame.normal, atol=0, rtol=0)
+        assert other.parameters.wind_direction == angle
 
 
 def test_edited_state_replay_and_snapshot_are_lossless(basis, tmp_path):

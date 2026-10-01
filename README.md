@@ -36,8 +36,10 @@ seconds, m/s, and kilometres of fetch. The original extended slider ranges are
 retained; the extreme wind settings are artist controls, not a claim that the
 empirical data validates every such condition. Ctrl-click a slider to enter a value.
 
-Wind, fetch, depth, swell and direction edit continuously on the GPU. They reuse
+Wind speed, fetch, depth and swell edit continuously on the GPU. They reuse
 the seeded wave components; depth edits also preserve their accumulated phase.
+Wind direction rotates the mesh and normals, preserving the exact wave pattern.
+The simulation stays in its original +X frame; 90 degrees places it along +Y.
 The controls have a short, 0.1-second response to smooth pointer motion. Domain,
 resolution and seed changes build a new wave basis. Space pauses propagation
 while leaving these controls live.

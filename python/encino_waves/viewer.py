@@ -14,7 +14,7 @@ from wgpu.utils.imgui import ImguiRenderer
 import wgpu
 from .model import Wave_parameters, Phase_step, evaluate
 from .editing import (make_wave_basis, state_from_basis, same_wave_basis,
-                      follow_parameters, preserve_phase, restore_phase)
+                      follow_parameters, edit_state, restore_phase)
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
 from .presets import SCENES, scene_with_resolution
 from .camera import frame_domain
@@ -140,13 +140,14 @@ class Viewer:
             self.reset_requested=False
         parameters=follow_parameters(self.state.parameters,desired,elapsed)
         if parameters!=self.state.parameters:
-            target=state_from_basis(self.basis,parameters)
-            self.state=preserve_phase(self.state,target,self.time)
+            self.state=edit_state(self.basis,self.state,parameters,self.time)
             self.post_seed=True
         if self.comparing:
             parameters=self.state.parameters.tessendorf()
-            if self.comparison_state is None or self.comparison_state.parameters!=parameters:
+            if self.comparison_state is None:
                 self.comparison_state=state_from_basis(self.basis,parameters)
+            elif self.comparison_state.parameters!=parameters:
+                self.comparison_state=edit_state(self.basis,self.comparison_state,parameters,self.time)
             # Both panels use exactly the same travelling-wave phase history.
             if self.comparison_state.phase is not self.state.phase:
                 self.comparison_state=replace(self.comparison_state,phase=self.state.phase,
@@ -154,6 +155,19 @@ class Viewer:
         else:
             self.comparison_state=None
         self.changed=self.state.parameters!=desired
+
+    def _upload_state(self,renderer,state,previous):
+        # An orientation edit only changes the mesh transform. A paused ocean
+        # can keep its FFT results and textures, including in comparison view.
+        same_fields=previous is not None and all(
+            getattr(state,name) is getattr(previous,name)
+            for name in ("h_positive","h_negative","omega","multipliers","phase"))
+        same_fields=same_fields and state.phase_steps==previous.phase_steps and (
+            state.parameters.in_ocean_space()==previous.parameters.in_ocean_space())
+        if renderer.frame is None or renderer.frame.time!=self.time or not same_fields:
+            renderer.upload(evaluate(state,self.time))
+        elif renderer.frame.parameters!=state.parameters:
+            renderer.frame=replace(renderer.frame,parameters=state.parameters)
 
     def draw(self):
         now=time.perf_counter()
@@ -177,9 +191,8 @@ class Viewer:
                 self.message=str(error)
             self.future=None
         self._update_parameters(delta)
-        if self.renderer.frame is None or self.rendered_state is not self.state or self.renderer.frame.time!=self.time:
-            self.renderer.upload(evaluate(self.state,self.time))
-            self.rendered_state=self.state
+        self._upload_state(self.renderer,self.state,self.rendered_state)
+        self.rendered_state=self.state
         if self.saved_shading is not None:
             self.renderer.restore_shading_statistics(self.saved_shading)
             self.saved_shading=None
@@ -187,9 +200,8 @@ class Viewer:
         if self.comparing and self.comparison_state is not None:
             if self.comparison_renderer is None:
                 self.comparison_renderer=Ocean_renderer(self.device,self.sky_path,target_format=self.format)
-            if self.comparison_renderer.frame is None or self.rendered_comparison_state is not self.comparison_state or self.comparison_renderer.frame.time!=self.time:
-                self.comparison_renderer.upload(evaluate(self.comparison_state,self.time))
-                self.rendered_comparison_state=self.comparison_state
+            self._upload_state(self.comparison_renderer,self.comparison_state,self.rendered_comparison_state)
+            self.rendered_comparison_state=self.comparison_state
             if self.saved_comparison_shading is not None:
                 self.comparison_renderer.restore_shading_statistics(self.saved_comparison_shading)
                 self.saved_comparison_shading=None
@@ -397,7 +409,7 @@ class Viewer:
         self._slider("Fetch","fetch_km",1,5000,"%.0f km","How far the wind has had to build the sea.",True)
         self._slider("Ocean depth","depth",.25,1000,"%.1f m","Depth changes the wave spectrum and speed while preserving travelling-wave phase.",True)
         self._slider("Swell","swell",-1,2,"%.2f","0: empirical spreading; positive: narrower swell; -1: all directions equally.")
-        self._slider("Wind direction","wind_direction",-180,180,"%.0f degrees","Rotate the wind while keeping the camera fixed.")
+        self._slider("Wind direction","wind_direction",-180,180,"%.0f degrees","Rotate the same ocean. 0 degrees is +X; 90 degrees is +Y.")
         imgui.text("Directional spreading")
         models=["donelan_banner","hasselmann","mitsuyasu","cosine_squared"]
         labels=["Donelan-Banner","Hasselmann","Mitsuyasu","Cosine squared"]

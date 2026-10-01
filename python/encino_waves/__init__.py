@@ -6,7 +6,7 @@ contract (PyTorch itself does not provide immutable tensors).
 """
 
 from .model import Wave_parameters, Initial_state, Wave_frame, make_initial_state, evaluate
-from .editing import Wave_basis, make_wave_basis, state_from_basis, preserve_phase
+from .editing import Wave_basis, make_wave_basis, state_from_basis, preserve_phase, edit_state
 
 __all__ = ["Wave_parameters", "Initial_state", "Wave_frame", "make_initial_state", "evaluate",
-           "Wave_basis", "make_wave_basis", "state_from_basis", "preserve_phase"]
+           "Wave_basis", "make_wave_basis", "state_from_basis", "preserve_phase", "edit_state"]
