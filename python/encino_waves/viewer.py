@@ -483,6 +483,25 @@ class Viewer:
                 if changed: self.foam_parameters=replace(self.foam_parameters,**{name:value})
             changed,value=imgui.slider_float("Underwater bubbles",self.look.aeration,0,2,"%.2f")
             if changed: self.look=replace(self.look,aeration=value)
+            changed,value=imgui.slider_float("Fresh crests",self.look.crest_foam,0,1,"%.2f")
+            if changed: self.look=replace(self.look,crest_foam=value)
+            if imgui.is_item_hovered(): imgui.set_tooltip("Light foam on the current crests, alongside the accumulated foam. Zero hides this layer.")
+            changed,value=imgui.slider_float("Crest breakup",self.look.crest_breakup,0,1,"%.2f")
+            if changed: self.look=replace(self.look,crest_breakup=value)
+            if imgui.is_item_hovered(): imgui.set_tooltip("Breakup of fresh crests only. Lower values keep the crests more continuous without changing foam emission.")
+            changed,value=imgui.slider_float("Wind streaks",self.foam_parameters.windrows,0,1,"%.2f")
+            if changed: self.foam_parameters=replace(self.foam_parameters,windrows=value)
+            if imgui.is_item_hovered(): imgui.set_tooltip("Long-lived foam gathers along the wind. Builds with Beaufort 7-8 winds and swell above 0.5. Zero disables and clears the streaks.")
+            if imgui.tree_node("Streak controls"):
+                for label,name,lo,hi,fmt in (("Spacing","windrow_spacing",8,128,"%.0f m"),
+                        ("Streak lifetime","windrow_half_life",5,180,"%.0f s"),
+                        ("Gathering","windrow_gathering",0,1,"%.2f m/s"),
+                        ("Side-to-side bend","windrow_warp",0,8,"%.1f m"),
+                        ("Bend time","windrow_warp_period",30,300,"%.0f s")):
+                    changed,value=imgui.slider_float(label,getattr(self.foam_parameters,name),lo,hi,fmt)
+                    if changed: self.foam_parameters=replace(self.foam_parameters,**{name:value})
+                imgui.text_wrapped("Streaks emerge gradually in strong winds and swell. Existing streaks fade as conditions ease.")
+                imgui.tree_pop()
             sizes=[256,512,1024,2048]
             # Small test / API maps are valid even though the UI starts at 256.
             if self.foam_parameters.resolution not in sizes: sizes=sorted(sizes+[self.foam_parameters.resolution])

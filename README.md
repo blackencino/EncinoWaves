@@ -58,6 +58,26 @@ The map defaults to 512² independently of wave resolution, with options through
 2048². Emission, lifetime, breakup, spreading, exchange, and underwater strength
 are adjustable in the panel.
 
+The defaults are emission **1.20**, surface lifetime **1.5 s**, breakup **1.00**,
+spreading **0.56 m²/s**, shallow-to-deep exchange **0.29/s**, and underwater
+bubbles **1.25**. **Fresh crests** adds a light immediate crest layer (0.15),
+with separate **Crest breakup** (0.25), alongside accumulated foam.
+
+**Wind streaks** retains a small fraction of emitted foam for longer and gathers
+it into bands along the wind. New streak emission ramps up over **13.9–20.7 m/s**
+(Beaufort 7–8) and **swell 0.5–0.8**; both conditions are required. The default
+amount is **0.45**, with no streaks in the default, lower-swell sea. Let strong
+seas play for 30–60 seconds to build the history. Set the amount to zero to
+disable and clear it. Existing streaks fade when conditions ease; the usual
+reset on major sea changes still applies.
+
+**Streak controls** exposes spacing, lifetime, gathering, **Side-to-side bend**
+(2 m), and **Bend time** (120 s). A broad, slowly changing crosswind deformation
+moves existing streaks as they age. This is a periodic appearance approximation,
+separate from the wave spectrum; it does not simulate Langmuir circulation.
+The streak preview tool also saves a scene with a minute of accumulated history;
+open it with `./run_viewer.command --scene renders/foam_streaks_preview.json`.
+
 Saved scenes include adjacent `.foam_state.npz` and, for comparisons,
 `.comparison_foam_state.npz` checkpoints. Keep these files beside their scene
 JSON. Exports resume the saved history, including at higher wave resolutions.
@@ -181,6 +201,9 @@ are not a keyframed recording of the parameter controls.
 .venv/bin/python tools/benchmark_editing.py --resolution 1024 --frames 30
 .venv/bin/python tools/benchmark_foam.py --resolution 4096 --frames 30
 .venv/bin/python tools/foam_preview.py
+.venv/bin/python tools/foam_detail_preview.py crests
+.venv/bin/python tools/foam_detail_preview.py streaks
+.venv/bin/python tools/benchmark_foam.py --streaks
 ```
 
 On the NVIDIA workstation, use the corresponding virtual environment Python and

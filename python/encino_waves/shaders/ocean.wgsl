@@ -11,7 +11,7 @@ struct Uniforms {
     grid: vec4f,         // x segments, y segments, near distance, far distance
     statistics: vec4f,   // big height, crest gain, crest bias, max crest
     moon_color: vec4f,
-    aeration: vec4f,      // use foam history, subsurface strength, unused, unused
+    aeration: vec4f,      // use foam history, subsurface strength, fresh crests, crest breakup
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var wave_sampler: sampler;
@@ -189,7 +189,18 @@ fn layered_fog(color: vec3f, distance: f32, incident: vec3f) -> vec3f {
         // Mip-filtered bubble-scale breakup is anchored to the ocean. Its
         // average tends to one in the distance, without crawling pixel noise.
         let grain=textureSample(foam_texture,wave_sampler,in.uv*4.0).a;
-        let coverage=smoothstep(.07,.5,density.r*(.35+1.3*grain));
+        let old_coverage=smoothstep(.07,.5,density.r*(.35+1.3*grain));
+        // A light immediate crest layer fills gaps before foam accumulates.
+        // Its breakup is independent of emission and never cuts holes as
+        // strongly by default. Use the same softer lighting as aged foam.
+        var fresh_coverage=0.0;
+        if u.ocean.z<u.statistics.w {
+            let crest=textureSample(displacements,wave_sampler,in.uv).w*u.statistics.y+u.statistics.z;
+            let breakup=mix(1.0,grain,clamp(u.aeration.w,0.0,1.0));
+            fresh_coverage=clamp(smoothstep(u.ocean.z,u.statistics.w,crest)*u.aeration.z*breakup*u.ocean.w,0.0,1.0);
+        }
+        // Coverage union: already opaque foam does not get a second bright coat.
+        let coverage=old_coverage+(1.0-old_coverage)*fresh_coverage;
         let foam_light=.35*diffuse+.45*environment(normalize(vec3f(normal.xy*.3,1.0)),4.0);
         color=mix(color,foam_light,coverage);
     } else if u.ocean.z<u.statistics.w {

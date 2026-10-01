@@ -12,9 +12,11 @@ parser.add_argument("--resolution",type=int,default=1024)
 parser.add_argument("--foam-resolution",type=int,default=512)
 parser.add_argument("--device",default="auto")
 parser.add_argument("--frames",type=int,default=30)
+parser.add_argument("--streaks",action="store_true",help="Include strong-sea wind streaks and their history warp")
 args=parser.parse_args()
 if args.frames < 1: parser.error("frames must be positive")
-waves=make_edited_state(Wave_parameters(resolution=args.resolution),args.device)
+waves=make_edited_state(Wave_parameters(resolution=args.resolution,
+    wind_speed=24 if args.streaks else 17,swell=.8 if args.streaks else .35),args.device)
 p=Foam_parameters(resolution=args.foam_resolution)
 foam=None
 times=[]
@@ -27,4 +29,5 @@ for i in range(args.frames+3):
     if i>=3: times.append((time.perf_counter()-start)*1000)
 print(json.dumps({"device":str(waves.device),"waves":args.resolution,"foam":args.foam_resolution,
     "foam_step_median_ms":float(np.median(times)),"foam_step_p95_ms":float(np.percentile(times,95)),
-    "density_bytes":foam.density.numel()*foam.density.element_size()},indent=2))
+    "density_bytes":foam.density.numel()*foam.density.element_size(),
+    "windrow_bytes":0 if foam.windrows is None else foam.windrows.numel()*foam.windrows.element_size()},indent=2))

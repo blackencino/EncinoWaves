@@ -19,7 +19,9 @@ class Look:
     foam: float = 1.0
     crest_threshold: float = 0.5
     crest_maximum: float = 1.1
-    aeration: float = 1.0
+    aeration: float = 1.25
+    crest_foam: float = .15
+    crest_breakup: float = .25
 
 
 @dataclass(frozen=True)
@@ -185,13 +187,16 @@ class Ocean_renderer:
         previous = self.foam_state
         self.foam_state = state
         if state is None: return
-        if previous is not None and previous.density is state.density: return
+        if (previous is not None and previous.density is state.density and
+                previous.windrows is state.windrows): return
         rgb = state.density.permute(1,2,0).cpu().numpy()
         data = np.zeros((*rgb.shape[:2],4),np.float16)
         data[...,:3] = np.minimum(rgb,60000)
+        if state.windrows is not None:
+            data[...,0] = np.minimum(rgb[...,0]+state.windrows.cpu().numpy(),60000)
         if self.foam_grain_basis is not state.basis:
             # Stable fine bubble breakup, carried in the otherwise unused alpha
-            # channel. Density history remains exactly the three RGB fields.
+            # channel. Windrow residue joins the surface density at display only.
             grain=state.basis.noise_cos[-1].cpu().numpy()
             self.foam_grain=np.clip(.5+grain*(.5/(.5**3/1.875)),0,1).astype(np.float16)
             self.foam_grain_basis=state.basis
@@ -236,7 +241,7 @@ class Ocean_renderer:
             [*self.mesh_resolution,.5,30000],
             [self.big_height,self.crest_gain,self.crest_bias,look.crest_maximum],
             [*(self.moon_color*look.sky_gain),0],
-            [float(self.foam_state is not None),look.aeration,0,0],
+            [float(self.foam_state is not None),look.aeration,look.crest_foam,look.crest_breakup],
         ],np.float32)
         self.device.queue.write_buffer(self.uniform,0,uniform)
         encoder = self.device.create_command_encoder()
