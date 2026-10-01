@@ -11,6 +11,7 @@ from PIL import Image
 import numpy as np
 from rendercanvas.offscreen import RenderCanvas
 from encino_waves.viewer import Viewer
+from encino_waves.foam import prepare_foam
 from imgui_bundle import imgui
 
 canvas = RenderCanvas(size=(1440, 900))
@@ -44,6 +45,10 @@ try:
     assert viewer.state.parameters.depth == 8
     assert viewer.state.phase_steps
     assert viewer.comparison_state.phase is viewer.state.phase
+    viewer.foam_state=prepare_foam(viewer.state,viewer.time,viewer.foam_parameters,preroll=1)
+    viewer.comparison_foam_state=prepare_foam(viewer.comparison_state,viewer.time,viewer.foam_parameters,preroll=1)
+    assert float(viewer.foam_state.density.sum().cpu()) > 0
+    foam_before=viewer.foam_state
     pixels = np.asarray(canvas.draw())
     Image.fromarray(pixels).save('renders/viewer_comparison.png')
     # Rotating the mesh changes placement only, including while paused.
@@ -58,6 +63,7 @@ try:
     with patch('encino_waves.viewer.evaluate',side_effect=AssertionError('Direction recomputed the FFT')):
         canvas.draw()
     assert not viewer.changed and viewer.state.parameters.wind_direction == 73
+    assert viewer.foam_state is foam_before
     assert viewer.state.h_positive is states[0].h_positive
     assert viewer.comparison_state.h_positive is states[1].h_positive
     for renderer, frame, shading in zip(renderers,frames,statistics):
@@ -84,13 +90,19 @@ try:
     canvas.draw()
     after = viewer.renderer.render_image(480,270,viewer.camera,viewer.look,left_renderer=viewer.comparison_renderer)
     np.testing.assert_array_equal(before,after)
+    assert float(viewer.foam_state.density.sum().cpu()) > 0
+    wave_frame=viewer.renderer.frame
+    viewer.reset_foam()
+    canvas.draw()
+    assert float(viewer.foam_state.density.sum().cpu()) == 0
+    assert viewer.renderer.frame is wave_frame
     original_header = imgui.collapsing_header
     def expanded_header(label):
         imgui.set_next_item_open(True)
         return original_header(label)
     imgui.collapsing_header = expanded_header
     canvas.draw()
-    print('Viewer UI, wind/depth edits, mesh rotation, phase replay, Maya events, comparison, and all panels passed',flush=True)
+    print('Viewer UI, wave edits, rotation, RGB foam replay/reset, Maya events, comparison, and all panels passed',flush=True)
 finally:
     viewer.executor.shutdown(wait=True,cancel_futures=True)
     canvas.close()

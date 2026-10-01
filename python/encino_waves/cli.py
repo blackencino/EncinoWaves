@@ -30,6 +30,8 @@ def parser():
         p.add_argument("--width",type=int,default=1920)
         p.add_argument("--height",type=int,default=1080)
         p.add_argument("--overwrite",action="store_true")
+        p.add_argument("--foam",action=argparse.BooleanOptionalAction,default=None,help="Persistent RGB foam; --no-foam restores crest shading")
+        p.add_argument("--foam-preroll",type=float,default=6.0,help="Seconds of foam buildup when no saved history is available (0-60)")
     for p in (view,still,render):
         p.add_argument("--scene",type=Path,help="JSON saved by the viewer")
     for p in (still,render):
@@ -86,9 +88,11 @@ def main(argv=None):
     from .presets import scene_with_resolution
     from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
     from .export import Shot,render_shots,academy_shots
+    from .foam import Foam_parameters, prepare_foam
     if args.width<16 or args.height<16: raise ValueError("Image dimensions must be at least 16")
     if args.command=="demo":
         shots=academy_shots(args.resolution)
+        shots=tuple(replace(shot,foam=replace(shot.foam,enabled=args.foam if args.foam is not None else True),foam_preroll=args.foam_preroll) for shot in shots)
         if args.preview: shots=tuple(replace(shot,duration=2) for shot in shots)
     else:
         scene=scene_with_resolution(args.preset-1,args.resolution)
@@ -98,6 +102,8 @@ def main(argv=None):
         comparison_shading=None
         post_seed=False
         phase_steps=()
+        foam=Foam_parameters()
+        foam_state=comparison_foam_state=None
         if args.scene:
             saved=json.loads(args.scene.read_text())
             p=Wave_parameters(**saved["parameters"])
@@ -107,10 +113,14 @@ def main(argv=None):
             start_time=saved.get("time",start_time)
             post_seed=saved.get("post_seed",False)
             phase_steps=tuple(Phase_step(**step) for step in saved.get("phase_steps",()))
+            foam=Foam_parameters(**saved.get("foam",{"enabled":False}))
+            if saved.get("foam_state"): foam_state=str(args.scene.parent/saved["foam_state"])
+            if saved.get("comparison_foam_state"): comparison_foam_state=str(args.scene.parent/saved["comparison_foam_state"])
             args.compare=args.compare or saved.get("comparison",False)
             if saved.get("shading_statistics"): shading=Shading_statistics(**saved["shading_statistics"])
             if saved.get("comparison_shading_statistics"): comparison_shading=Shading_statistics(**saved["comparison_shading_statistics"])
         if args.time is not None: start_time=args.time
+        if args.foam is not None: foam=replace(foam,enabled=args.foam)
         if args.tessendorf: p=p.tessendorf()
         if args.command=="still":
             if args.output.exists() and not args.overwrite: raise FileExistsError(args.output)
@@ -121,17 +131,21 @@ def main(argv=None):
             state=make_state(p)
             renderer=Ocean_renderer(make_device(),args.sky,mesh_resolution=(960,576))
             renderer.upload(evaluate(state,start_time))
+            renderer.upload_foam(prepare_foam(state,start_time,foam,foam_state,args.foam_preroll))
             if shading: renderer.restore_shading_statistics(shading)
             other=None
             if args.compare:
                 other=Ocean_renderer(renderer.device,args.sky,mesh_resolution=(960,576))
-                other.upload(evaluate(make_state(p.tessendorf()),start_time))
+                other_state=make_state(p.tessendorf())
+                other.upload(evaluate(other_state,start_time))
+                other.upload_foam(prepare_foam(other_state,start_time,foam,comparison_foam_state,args.foam_preroll))
                 if comparison_shading: other.restore_shading_statistics(comparison_shading)
             args.output.parent.mkdir(parents=True,exist_ok=True)
             Image.fromarray(renderer.render_image(args.width,args.height,camera,look,left_renderer=other)).save(args.output)
             print(args.output); return
         if args.seconds<=0: raise ValueError("seconds must be positive")
-        shots=(Shot(args.seconds,scene.name,scene.description,p,args.compare,camera,look,start_time,shading,comparison_shading,post_seed,phase_steps),)
+        shots=(Shot(args.seconds,scene.name,scene.description,p,args.compare,camera,look,start_time,shading,comparison_shading,post_seed,phase_steps,
+                    foam,foam_state,comparison_foam_state,args.foam_preroll),)
     if args.fps<1 or args.fps>120: raise ValueError("fps must be between 1 and 120")
     if args.max_mbps is not None and (not math.isfinite(args.max_mbps) or args.max_mbps<=0):
         raise ValueError("max-mbps must be finite and positive")

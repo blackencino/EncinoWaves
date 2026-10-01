@@ -15,6 +15,7 @@ from .model import Wave_parameters, Phase_step, make_initial_state, evaluate
 from .editing import make_edited_state
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics, read_rgba
 from .camera import frame_domain
+from .foam import Foam_parameters, prepare_foam, advance_foam_to
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,10 @@ class Shot:
     comparison_shading_statistics: Shading_statistics | None = None
     post_seed: bool = False
     phase_steps: tuple[Phase_step, ...] = ()
+    foam: Foam_parameters = Foam_parameters()
+    foam_state: str | None = None
+    comparison_foam_state: str | None = None
+    foam_preroll: float = 6.0
 
 
 def academy_shots(resolution=2048):
@@ -147,16 +152,24 @@ def render_shots(shots,output,*,sky=None,device="auto",width=1920,height=1080,fp
                 comparison_renderer=Ocean_renderer(graphics,sky,mesh_resolution=(960,576))
             camera=shot.camera or frame_domain(shot.parameters.domain)
             look=shot.look
+            foam=prepare_foam(state,shot.start_time,shot.foam,shot.foam_state,shot.foam_preroll)
+            comparison_foam=prepare_foam(other,shot.start_time,shot.foam,shot.comparison_foam_state,shot.foam_preroll) if other else None
             frame_count=round(shot.duration*fps)
             manifest["shots"].append({**asdict(shot),"camera":asdict(camera),"look":asdict(look),"frames":frame_count})
             for i in range(frame_count):
                 # Offline simulation time depends only on frame index.
                 t=shot.start_time+i/fps
-                renderer.upload(evaluate(state,t))
+                frame=evaluate(state,t)
+                renderer.upload(frame)
+                foam=advance_foam_to(foam,state,frame,shot.foam)
+                renderer.upload_foam(foam)
                 if i==0 and shot.shading_statistics:
                     renderer.restore_shading_statistics(shot.shading_statistics)
                 if other:
-                    comparison_renderer.upload(evaluate(other,t))
+                    other_frame=evaluate(other,t)
+                    comparison_renderer.upload(other_frame)
+                    comparison_foam=advance_foam_to(comparison_foam,other,other_frame,shot.foam)
+                    comparison_renderer.upload_foam(comparison_foam)
                     if i==0 and shot.comparison_shading_statistics:
                         comparison_renderer.restore_shading_statistics(shot.comparison_shading_statistics)
                     half=width//2

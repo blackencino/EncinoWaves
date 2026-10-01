@@ -18,6 +18,7 @@ from .editing import (make_wave_basis, state_from_basis, same_wave_basis,
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
 from .presets import SCENES, scene_with_resolution
 from .camera import frame_domain
+from .foam import Foam_parameters, update_foam, save_foam, load_foam
 
 
 class Viewer:
@@ -48,6 +49,9 @@ class Viewer:
         self.show_ui=True
         self.playing=True
         self.time=10.0
+        self.foam_parameters=Foam_parameters()
+        self.foam_state=None
+        self.comparison_foam_state=None
         self.speed=1.0
         self.last_time=time.perf_counter()
         self.last_update=0.0
@@ -121,6 +125,11 @@ class Viewer:
         self.last_update=time.perf_counter()
         self.changed=True
         self.reset_requested=True
+        self.reset_foam()
+
+    def reset_foam(self):
+        self.foam_state=None
+        self.comparison_foam_state=None
 
     def _start_update(self):
         # Only lattice / random-basis edits need a CPU build. Physical controls
@@ -196,6 +205,9 @@ class Viewer:
         if self.saved_shading is not None:
             self.renderer.restore_shading_statistics(self.saved_shading)
             self.saved_shading=None
+        shading=self.renderer.shading_statistics
+        self.foam_state=update_foam(self.foam_state,self.renderer.frame,self.foam_parameters,shading.crest_gain,shading.crest_bias)
+        self.renderer.upload_foam(self.foam_state)
         view=target.create_view()
         if self.comparing and self.comparison_state is not None:
             if self.comparison_renderer is None:
@@ -205,6 +217,9 @@ class Viewer:
             if self.saved_comparison_shading is not None:
                 self.comparison_renderer.restore_shading_statistics(self.saved_comparison_shading)
                 self.saved_comparison_shading=None
+            shading=self.comparison_renderer.shading_statistics
+            self.comparison_foam_state=update_foam(self.comparison_foam_state,self.comparison_renderer.frame,self.foam_parameters,shading.crest_gain,shading.crest_bias)
+            self.comparison_renderer.upload_foam(self.comparison_foam_state)
             half=width//2
             self.comparison_renderer.draw(view,width,height,self.camera,self.look,viewport=(0,0,half,height))
             self.renderer.draw(view,width,height,self.camera,self.look,viewport=(half,0,width-half,height),clear=False)
@@ -231,6 +246,8 @@ class Viewer:
         self.message=f"Saved renders/{name}.png"
 
     def save_scene(self,path):
+        path=Path(path)
+        path.parent.mkdir(parents=True,exist_ok=True)
         sky=self.sky_path or self.renderer.sky_name
         metadata={"parameters":asdict(self.state.parameters),"camera":asdict(self.camera),"look":asdict(self.look),
                   "requested_parameters":asdict(self.parameters),"tessendorf_only":self.tessendorf_only,
@@ -240,7 +257,14 @@ class Viewer:
                   "comparison":self.comparing,"shading_statistics":asdict(self.renderer.shading_statistics),
                   "comparison_shading_statistics":asdict(self.comparison_renderer.shading_statistics)
                       if self.comparing and self.comparison_renderer is not None else None}
-        Path(path).write_text(json.dumps(metadata,indent=2)+"\n")
+        metadata["foam"]=asdict(self.foam_parameters)
+        for name,state in (("foam_state",self.foam_state),("comparison_foam_state",self.comparison_foam_state if self.comparing else None)):
+            metadata[name]=None
+            if state is not None:
+                checkpoint=path.with_name(path.stem+"."+name+".npz")
+                save_foam(checkpoint,state)
+                metadata[name]=checkpoint.name
+        path.write_text(json.dumps(metadata,indent=2)+"\n")
 
     def load_scene(self,path):
         saved=json.loads(Path(path).read_text())
@@ -248,6 +272,9 @@ class Viewer:
         self.camera=Camera(**saved["camera"])
         self.look=Look(**saved["look"])
         self.time=saved.get("time",10.0)
+        self.foam_parameters=Foam_parameters(**saved.get("foam",{"enabled":False}))
+        self.foam_state=load_foam(Path(path).parent/saved["foam_state"],self.device_name) if saved.get("foam_state") else None
+        self.comparison_foam_state=load_foam(Path(path).parent/saved["comparison_foam_state"],self.device_name) if saved.get("comparison_foam_state") else None
         self.comparing=saved.get("comparison",False)
         self.tessendorf_only=saved.get("tessendorf_only",False)
         if saved.get("sky"): self.load_sky(saved["sky"])
@@ -436,7 +463,32 @@ class Viewer:
         if imgui.button("Save still",(116,0)): self.save_requested=True
         imgui.end_disabled()
         changed,value=imgui.slider_float("Time",self.time,0,300,"%.1f s")
-        if changed: self.time=value
+        if changed:
+            self.time=value
+            self.reset_foam()
+        if imgui.collapsing_header("Foam & aeration"):
+            changed,value=imgui.checkbox("Persistent foam",self.foam_parameters.enabled)
+            if changed:
+                self.foam_parameters=replace(self.foam_parameters,enabled=value)
+                self.reset_foam()
+            if imgui.is_item_hovered(): imgui.set_tooltip("Build surface foam and underwater bubbles over time. Off restores the original crest shading.")
+            if imgui.button("Reset foam"): self.reset_foam()
+            for label,name,lo,hi,fmt in (
+                ("Emission","emission",0,5,"%.2f /s"),
+                ("Surface lifetime","surface_half_life",.3,20,"%.1f s"),
+                ("Breakup","breakup",0,1,"%.2f"),
+                ("Spreading","diffusion",0,1,"%.2f m2/s"),
+                ("Shallow to deep","exchange",0,1,"%.2f /s")):
+                changed,value=imgui.slider_float(label,getattr(self.foam_parameters,name),lo,hi,fmt)
+                if changed: self.foam_parameters=replace(self.foam_parameters,**{name:value})
+            changed,value=imgui.slider_float("Underwater bubbles",self.look.aeration,0,2,"%.2f")
+            if changed: self.look=replace(self.look,aeration=value)
+            sizes=[256,512,1024,2048]
+            # Small test / API maps are valid even though the UI starts at 256.
+            if self.foam_parameters.resolution not in sizes: sizes=sorted(sizes+[self.foam_parameters.resolution])
+            changed,index=imgui.combo("Foam map",sizes.index(self.foam_parameters.resolution),[str(n) for n in sizes])
+            if changed: self.foam_parameters=replace(self.foam_parameters,resolution=sizes[index])
+            imgui.text_wrapped("Foam builds during playback. Major sea changes and time scrubbing clear its history.")
         expanded=imgui.collapsing_header("Camera & light")
         if expanded:
             for label,name,lo,hi,fmt in (("Height","height",.5,2000,"%.1f m"),("Pitch","pitch",-89,89,"%.1f deg"),("Heading","yaw",-180,180,"%.1f deg")):

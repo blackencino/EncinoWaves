@@ -44,6 +44,27 @@ The controls have a short, 0.1-second response to smooth pointer motion. Domain,
 resolution and seed changes build a new wave basis. Space pauses propagation
 while leaving these controls live.
 
+The **Foam & aeration** panel adds a separate, persistent RGB map: surface foam,
+shallow bubbles, and deeper bubbles. Crests emit through slowly evolving fractal
+breakup; existing foam diffuses, fades, and exchanges from shallow to deep.
+The shader uses it for lingering surface patches and underwater scattering.
+The wave spectrum and displacement are unchanged. Turn **Persistent foam** off
+to return to the original crest shading.
+
+Foam builds during playback; pausing freezes its history. **Reset foam** clears
+it without restarting the waves. Large physical edits, a new patch/seed, and
+time scrubbing also clear history. Rotating the ocean rotates the existing foam.
+The map defaults to 512² independently of wave resolution, with options through
+2048². Emission, lifetime, breakup, spreading, exchange, and underwater strength
+are adjustable in the panel.
+
+Saved scenes include adjacent `.foam_state.npz` and, for comparisons,
+`.comparison_foam_state.npz` checkpoints. Keep these files beside their scene
+JSON. Exports resume the saved history, including at higher wave resolutions.
+Without a checkpoint, offline renders build six seconds of foam before the
+first output frame; use `--foam-preroll 0` for a fresh start or `--no-foam` for
+the original shading. Old scenes without foam settings keep their original look.
+
 The camera preserves the original Z-up Maya center-of-interest model:
 
 | Input | Action |
@@ -118,7 +139,7 @@ leave an existing completed output intact.
 
 ### Numerical verification and device acceptance
 
-The core has no viewer dependency and evaluates at absolute time:
+The wave core has no viewer dependency and evaluates at absolute time:
 
 ```python
 from encino_waves import Wave_parameters, make_initial_state, evaluate
@@ -158,6 +179,8 @@ are not a keyframed recording of the parameter controls.
 .venv/bin/python tools/viewer_smoke.py
 .venv/bin/python -m encino_waves benchmark --resolution 4096 --frames 30
 .venv/bin/python tools/benchmark_editing.py --resolution 1024 --frames 30
+.venv/bin/python tools/benchmark_foam.py --resolution 4096 --frames 30
+.venv/bin/python tools/foam_preview.py
 ```
 
 On the NVIDIA workstation, use the corresponding virtual environment Python and

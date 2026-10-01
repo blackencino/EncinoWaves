@@ -19,6 +19,7 @@ class Look:
     foam: float = 1.0
     crest_threshold: float = 0.5
     crest_maximum: float = 1.1
+    aeration: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class Ocean_renderer:
         self.device = device
         self.format = target_format
         self.mesh_resolution = mesh_resolution
-        self.uniform = device.create_buffer(size=176, usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
+        self.uniform = device.create_buffer(size=192, usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
         self.wave_sampler = device.create_sampler(address_mode_u="repeat", address_mode_v="repeat",
                                                  mag_filter="linear", min_filter="linear", mipmap_filter="linear")
         self.sky_sampler = device.create_sampler(address_mode_u="repeat", address_mode_v="clamp-to-edge",
@@ -61,6 +62,7 @@ class Ocean_renderer:
             {"binding":3,"visibility":2,"texture":{"sample_type":"float"}},
             {"binding":4,"visibility":2,"sampler":{"type":"filtering"}},
             {"binding":5,"visibility":2,"texture":{"sample_type":"float"}},
+            {"binding":6,"visibility":2,"texture":{"sample_type":"float"}},
         ])
         layout = device.create_pipeline_layout(bind_group_layouts=[self.layout])
         self.sky_pipeline = device.create_render_pipeline(layout=layout,
@@ -86,6 +88,13 @@ class Ocean_renderer:
         self.wave_size = 0
         self.wave_textures = []
         self.wave_mips = []
+        self.foam_state = None
+        self.foam_texture = self._make_texture(1,1)
+        self._write_texture(self.foam_texture,np.zeros((1,1,4),np.float16))
+        self.foam_mips = []
+        self.foam_dirty = False
+        self.foam_grain_basis = None
+        self.foam_grain = None
         sky_pixels,self.sky_name = load_sky(sky)
         self.sky = self._make_texture(sky_pixels.shape[1],sky_pixels.shape[0])
         self.sky_storage_scale=max(1.0,float(np.max(sky_pixels[...,:3]))/60000)
@@ -144,14 +153,7 @@ class Ocean_renderer:
             self.wave_size = n
             self.wave_textures = [self._make_texture(n,n) for _ in range(2)]
             self.wave_mips = [self._make_mip_groups(texture) for texture in self.wave_textures]
-            self.bind_group = self.device.create_bind_group(layout=self.layout,entries=[
-                {"binding":0,"resource":{"buffer":self.uniform}},
-                {"binding":1,"resource":self.wave_sampler},
-                {"binding":2,"resource":self.wave_textures[0].create_view()},
-                {"binding":3,"resource":self.wave_textures[1].create_view()},
-                {"binding":4,"resource":self.sky_sampler},
-                {"binding":5,"resource":self.sky.create_view()},
-            ])
+            self._bind_textures()
         for texture,data in zip(self.wave_textures,maps):
             self._write_texture(texture,data)
         parameters = frame.parameters.in_ocean_space()
@@ -165,6 +167,43 @@ class Ocean_renderer:
             self.statistics_parameters=parameters
         self.frame = frame
         self.mips_dirty = True
+
+    def _bind_textures(self):
+        if not self.wave_textures: return
+        self.bind_group = self.device.create_bind_group(layout=self.layout,entries=[
+            {"binding":0,"resource":{"buffer":self.uniform}},
+            {"binding":1,"resource":self.wave_sampler},
+            {"binding":2,"resource":self.wave_textures[0].create_view()},
+            {"binding":3,"resource":self.wave_textures[1].create_view()},
+            {"binding":4,"resource":self.sky_sampler},
+            {"binding":5,"resource":self.sky.create_view()},
+            {"binding":6,"resource":self.foam_texture.create_view()},
+        ])
+
+    def upload_foam(self,state):
+        if state is self.foam_state: return
+        previous = self.foam_state
+        self.foam_state = state
+        if state is None: return
+        if previous is not None and previous.density is state.density: return
+        rgb = state.density.permute(1,2,0).cpu().numpy()
+        data = np.zeros((*rgb.shape[:2],4),np.float16)
+        data[...,:3] = np.minimum(rgb,60000)
+        if self.foam_grain_basis is not state.basis:
+            # Stable fine bubble breakup, carried in the otherwise unused alpha
+            # channel. Density history remains exactly the three RGB fields.
+            grain=state.basis.noise_cos[-1].cpu().numpy()
+            self.foam_grain=np.clip(.5+grain*(.5/(.5**3/1.875)),0,1).astype(np.float16)
+            self.foam_grain_basis=state.basis
+        data[...,3] = self.foam_grain
+        n = data.shape[0]
+        if self.foam_texture.size[0] != n:
+            self.foam_texture.destroy()
+            self.foam_texture = self._make_texture(n,n)
+            self.foam_mips = self._make_mip_groups(self.foam_texture)
+            self._bind_textures()
+        self._write_texture(self.foam_texture,data)
+        self.foam_dirty = True
 
     @property
     def shading_statistics(self):
@@ -197,6 +236,7 @@ class Ocean_renderer:
             [*self.mesh_resolution,.5,30000],
             [self.big_height,self.crest_gain,self.crest_bias,look.crest_maximum],
             [*(self.moon_color*look.sky_gain),0],
+            [float(self.foam_state is not None),look.aeration,0,0],
         ],np.float32)
         self.device.queue.write_buffer(self.uniform,0,uniform)
         encoder = self.device.create_command_encoder()
@@ -204,6 +244,9 @@ class Ocean_renderer:
             for groups in self.wave_mips:
                 self._mipmaps(encoder,groups)
             self.mips_dirty = False
+        if self.foam_dirty:
+            self._mipmaps(encoder,self.foam_mips)
+            self.foam_dirty = False
         render_pass = encoder.begin_render_pass(color_attachments=[
             {"view":target_view,"clear_value":(0,0,0,1),"load_op":"clear" if clear else "load","store_op":"store"}],
             depth_stencil_attachment={"view":self.depth.create_view(),"depth_clear_value":1.0,

@@ -224,11 +224,82 @@ The large-domain storm shot in the movie uses a separately staged camera at the
 default 512 m patch framing distance. Applying the 1800 m domain's full framing
 distance made the original fog obscure the shot.
 
+## Persistent foam and aeration
+
+`foam.py` is a separate functional appearance simulation. `Foam_state` contains
+explicit previous density and time; the synthesized wave state remains unchanged
+and history-independent. RGB stores nonnegative surface, shallow, and deep
+aeration densities in the ocean's undisplaced periodic coordinates. The mesh
+displacement carries this map along with the surface, and wind direction rotates
+the complete field. This version has no additional current/advection solver.
+
+Emission uses the original normalized negative minimum-eigenvalue crest map,
+with the same default 0.5–1.1 smooth threshold as the original shader. Calibration
+is held with the foam history. Source precision matches the half-float display
+map, avoiding amplified sub-texel residuals in nearly flat water. The model does
+not infer a measured whitecap
+fraction from wind speed; these remain artist controls. Four octaves of seeded,
+spatially periodic quintic noise evolve slowly in time and modulate emission.
+Thresholding precedes downsampling, preserving the contribution of narrow crests
+when a 4096² wave field drives a smaller foam map.
+
+Before each emission, three batched real FFTs and inverse FFTs solve periodic
+discrete diffusion using `exp(-D * dt * L)`. This preserves constant fields and
+wraps both edges, without a stencil stability restriction for small patches.
+Surface/shallow/deep diffusivities use a 1:3:7 ratio. Each channel fades with its
+own half-life; shallow-to-deep exchange and decay use the exact local linear
+solution. Diffusion and exchange are split operators. New aeration is deposited
+80% at the surface and 20% shallow; the deeper map fills through exchange.
+Emission is integrated over the frame interval, so results have timestep error
+when the source varies, rather than claiming frame-rate-independent exactness.
+
+The default 512² density state occupies 3 MiB in float32; its noise basis and
+FFT scratch are additional. The display boundary uploads RGBA16F, with RGB as
+density and alpha as stable, mip-filtered bubble detail. Subsurface density
+changes the existing shader's scattering, extinction and phase coefficients;
+surface density supplies a separate foam coverage layer. Dilute remnants become
+transparent rather than whitening the whole sea. Disabling persistent foam
+uses the original crest shading, with the original water constants.
+
+On this M2 Max, synchronized foam update work measured approximately 2.2 ms with
+1024² waves and a 512² foam map, and 6.9 ms with 4096² waves and the same foam map
+(7.1 ms p95, 20 samples for the latter). These exclude texture readback/upload
+and rendering. The higher wave resolution costs more in crest-source filtering;
+the history grid itself stays 512². `tools/benchmark_foam.py` measures this stage
+separately; `tools/foam_preview.py` renders an eight-second comparison.
+
+The viewer resets on time scrubbing, backward/large time jumps, domain/seed/model
+changes, or cumulative large physical changes relative to the last reset:
+wind speed ratio >1.35, fetch/depth ratio >2, swell change >0.35, or pinch change
+>0.3. It also provides an explicit Reset foam button. Direction, camera, sky and
+wave resolution preserve history; changing foam resolution or noise scale resets
+it. Paused frames do not decay or deposit again. Each comparison sea has its own
+history under matched controls.
+
+Scene JSON references lossless float32 NPZ checkpoints beside the JSON, including
+time, calibration, foam controls and the reference sea. Noise is regenerated from
+the saved seed. Checkpoints resume in still/movie export, even at a higher wave
+resolution, because the foam grid is independent. Shots without history use a
+six-second preroll at 30 Hz (`--foam-preroll`); low-FPS exports subdivide long
+output intervals. A changed output time starts new preroll rather than presenting
+the old checkpoint as the correct history at that time. Existing old scene JSON
+defaults to the original shading until foam is explicitly enabled.
+
+The local Tweak tree contains a precursor in
+`~/dvlp/src/bin/water/moveTxt2/main.cpp`: wrapped history advection, diffusion,
+then emission composited with decay. `fftCrest/main.cpp` supplies related crest
+source filtering. The exact three-channel depth-exchange implementation was not
+located. This implementation follows the requested process using current GPU
+operations; it does not incorporate the old library or add build dependencies.
+For published context, [Tessendorf, Reinhardt and Gao, Whitecap Phenomenology for
+Ocean Surface Simulation](https://jtessen.people.clemson.edu/gilligan/html/whitecap_fraction.pdf)
+describes minimum-eigenvalue emission and persistent, decaying whitecap textures.
+
 ## Verification limits
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
-exercised locally. On September 30, 2026 the numerical suite passed 71 checks
-with sixteen CUDA-only skips. The UI check exercises camera events, continuous
+exercised locally. On October 1, 2026 the numerical suite passed 88 checks
+with twenty-two CUDA-only skips. The UI check exercises camera events, continuous
 wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
 panels, including with the supplied Dutch Skies HDR. Direction edits preserve
 the exact spectral coefficients across all four spreading models. The UI test
@@ -236,6 +307,10 @@ also forbids spectrum and FFT evaluation during a paused direction edit. Rotatin
 mesh, camera and environment together reproduces the original rendered image
 within 0.003 mean 8-bit channel levels for both comparison seas. Saved rotated
 scenes round-trip pixel-exactly and export through the movie renderer.
+Populated RGB foam checkpoints also round-trip pixel-exactly; reset leaves the
+wave frame unchanged. Foam tests check periodic mass conservation and translation,
+seam diffusion, separate decay, shallow/deep exchange, retention after emission
+stops, pause behavior, reset conditions and replay at higher wave resolutions.
 The desktop window was reported as occluded
 by macOS during the final check; live mouse interaction still needs an unlocked,
 visible desktop. The window cancels before computing when occluded.

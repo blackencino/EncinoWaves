@@ -11,6 +11,7 @@ struct Uniforms {
     grid: vec4f,         // x segments, y segments, near distance, far distance
     statistics: vec4f,   // big height, crest gain, crest bias, max crest
     moon_color: vec4f,
+    aeration: vec4f,      // use foam history, subsurface strength, unused, unused
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var wave_sampler: sampler;
@@ -18,6 +19,7 @@ struct Uniforms {
 @group(0) @binding(3) var normals: texture_2d<f32>;
 @group(0) @binding(4) var sky_sampler: sampler;
 @group(0) @binding(5) var sky_texture: texture_2d<f32>;
+@group(0) @binding(6) var foam_texture: texture_2d<f32>;
 const pi: f32 = 3.141592653589793;
 
 fn rotate_xy(v: vec2f, angle: f32) -> vec2f {
@@ -164,9 +166,14 @@ fn layered_fog(color: vec3f, distance: f32, incident: vec3f) -> vec3f {
     let diffuse=.95*sun_color*max(dot(sun,normal),0.0)
                 +.35*moon_color*max(dot(moon,normal),0.0);
     let sky=environment(reflection,0.0);
-    let sigma=vec3f(3.3645,3.158,3.2428);
-    let scattering=vec3f(.1800,.1834,.2281);
-    let phase_g=vec3f(.902,.825,.914);
+    // RGB history: surface coverage, shallow aeration, deeper aeration. These
+    // densities move with the same ocean-space mesh and use its original media.
+    let density=max(textureSample(foam_texture,wave_sampler,in.uv).rgb,vec3f(0.0))*u.aeration.x*u.ocean.w;
+    let shallow=1.0-exp(-density.g*u.aeration.y*2.0);
+    let deep_air=1.0-exp(-density.b*u.aeration.y);
+    let sigma=vec3f(3.3645,3.158,3.2428)+shallow*vec3f(1.8)+deep_air*vec3f(.8);
+    let scattering=vec3f(.1800,.1834,.2281)+shallow*vec3f(1.35,1.50,1.55)+deep_air*vec3f(.25,.65,.80);
+    let phase_g=mix(vec3f(.902,.825,.914),vec3f(.65),clamp(shallow+.5*deep_air,0.0,1.0));
     let big_height=u.statistics.x;
     let deep2=full_extinction_color(sun_color,sigma,scattering,phase_g,sun,incident,big_height,in.world)
              +full_extinction_color(moon_color,sigma,scattering,phase_g,moon,incident,big_height,in.world);
@@ -176,7 +183,16 @@ fn layered_fog(color: vec3f, distance: f32, incident: vec3f) -> vec3f {
     let nh=dot(normal,half_vector);
     let specular=sun_color*refracted.kr*.01*pow(nh*nh,400.0);
     var color=refracted.kr*sky+specular+refracted.kt*deep2+.375*refracted.kt*deep+.001*diffuse;
-    if u.ocean.z<u.statistics.w {
+    if u.aeration.x>0.5 {
+        // Very dilute remnants are transparent; connected patches become an
+        // opaque foam layer instead of washing every ripple with white.
+        // Mip-filtered bubble-scale breakup is anchored to the ocean. Its
+        // average tends to one in the distance, without crawling pixel noise.
+        let grain=textureSample(foam_texture,wave_sampler,in.uv*4.0).a;
+        let coverage=smoothstep(.07,.5,density.r*(.35+1.3*grain));
+        let foam_light=.35*diffuse+.45*environment(normalize(vec3f(normal.xy*.3,1.0)),4.0);
+        color=mix(color,foam_light,coverage);
+    } else if u.ocean.z<u.statistics.w {
         let crest=textureSample(displacements,wave_sampler,in.uv).w*u.statistics.y+u.statistics.z;
         color=mix(color,diffuse,smoothstep(u.ocean.z,u.statistics.w,crest)*u.ocean.w);
     }
