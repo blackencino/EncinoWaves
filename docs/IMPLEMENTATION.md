@@ -172,6 +172,12 @@ cameras. Exposure is explicit and defaults to zero. There is no filmic tonemappe
 HDR pixels that exceed half-float range are stored with a uniform scale that is
 restored in the shader. Light extraction selects the upper hemisphere; the old
 loader searched all pixels. A real sky panorama's sun remains in that hemisphere.
+The supplied Dutch Skies 360 Autumn Pack 01, 03a is installed under the ignored
+`assets/local/` directory. Discovery selects its 4000×2000 `_Ref.hdr`, preserving
+linear HDR values and full panorama resolution, instead of the 360×180 blurred
+`_Env.hdr`. The original gain, display gamma, camera and water shader are retained.
+The native viewer and offline renderer share this selection; saved scenes store
+the resolved HDR path. The original files and sIBL descriptor remain together.
 Scene JSON includes the height and crest statistics from the original shader's
 initial normalization, for each comparison side. Reopening a saved scene is
 tested to reproduce identical pixels at the same render settings.
@@ -195,9 +201,10 @@ distance made the original fog obscure the shot.
 ## Verification limits
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
-exercised locally. On September 30, 2026 the numerical suite passed 41 checks
-with two CUDA-only skips. The UI check exercises camera events, scene round-trip,
-comparison and all expanded panels. The desktop window was reported as occluded
+exercised locally. On September 30, 2026 the numerical suite passed 60 checks
+with eleven CUDA-only skips. The UI check exercises camera events, continuous
+wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
+panels, including with the supplied Dutch Skies HDR. The desktop window was reported as occluded
 by macOS during the final check; live mouse interaction still needs an unlocked,
 visible desktop. The window cancels before computing when occluded.
 

@@ -74,6 +74,11 @@ automatically and are ignored by Git. Commercial sky files are not bundled or
 downloaded. If none is found, the viewer identifies its procedural fallback in
 the model panel. This fallback is not a Dutch Skies asset.
 
+On this Mac, **Dutch Skies 360 — Autumn Pack 01, 03a** is installed locally and
+loads by default. The viewer uses the full 4000×2000 reflection HDR; automatic
+discovery prefers a pack's `_Ref` panorama over its small `_Env` lighting map.
+The pack remains in the ignored `assets/local/` directory for this checkout.
+
 The water shader is ported from this project's `OceanTestShaders.cpp`, including
 the scattering, Fresnel, crest shading, gamma and fog. The starting camera uses
 the original framing rule and is well above the surface.

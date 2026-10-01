@@ -14,11 +14,15 @@ def find_sky():
         if not path.is_file():
             raise FileNotFoundError(path)
         return path
-    roots = (Path("assets/local"), Path.home()/"Pictures"/"Dutch Skies",
+    project_assets = Path(__file__).resolve().parents[2]/"assets"/"local"
+    roots = (Path("assets/local"), project_assets, Path.home()/"Pictures"/"Dutch Skies",
              Path.home()/"HDR", Path.home()/"HDRI")
     for root in roots:
         if root.is_dir():
-            files = sorted(p for p in root.rglob("*") if p.suffix.lower() in (".hdr", ".exr"))
+            # sIBL packs pair a detailed _Ref panorama with a tiny, blurred _Env
+            # map. The original water shader needs the detailed reflection sky.
+            files = sorted((p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in (".hdr", ".exr")),
+                           key=lambda p: (not p.stem.lower().endswith("_ref"), str(p).casefold()))
             if files:
                 return files[0]
     return None
