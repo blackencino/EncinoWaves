@@ -82,7 +82,7 @@ def test_reset_policy_preserves_rotation_and_resets_large_edits(device):
     state = step_foam(state,source(.1,device))
     for changes in ({"wind_direction":127},{"resolution":64},{"wind_speed":18},{"depth":95}):
         assert foam_reset_reason(state,replace(waves,**changes),p) is None
-    for changes in ({"seed":8},{"domain":100},{"depth":3},{"wind_speed":30},{"swell":1},{"spreading":"hasselmann"}):
+    for changes in ({"seed":8},{"domain":100},{"depth":3},{"wind_speed":30},{"swell":1},{"spreading":"donelan_banner"}):
         frame = source(.2,device,parameters=replace(waves,**changes))
         reset = update_foam(state,frame,p)
         assert reset.time == .2 and torch.count_nonzero(reset.density) == 0

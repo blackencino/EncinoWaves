@@ -9,7 +9,7 @@ No autograd, hidden evaluation history, amplitude normalization, or extra layers
 from dataclasses import dataclass, replace
 import math
 import numpy as np
-from scipy.special import gammaln
+from scipy.special import expit, gammaln
 import torch
 
 
@@ -21,7 +21,7 @@ class Wave_parameters:
     fetch_km: float = 300.0
     depth: float = 100.0
     swell: float = 0.35
-    spreading: str = "donelan_banner"
+    spreading: str = "hasselmann"
     spectrum: str = "tma"
     dispersion: str = "capillary"
     wind_direction: float = 0.0  # mesh rotation in degrees, +X towards +Y about Z
@@ -130,8 +130,8 @@ def spectrum_at(p, omega):
         result = .076*x**-.22 * p.gravity**2 / w**5 * np.exp(-1.25*(wm/w)**4) * sharpen
         if p.spectrum == "tma":
             # Smooth depth approximation explicitly allowed in section 5.1.5,
-            # and used by both original implementations.
-            result *= .5 + .5*np.tanh(1.8*(w*math.sqrt(p.depth/p.gravity)-1.125))
+            # with the equivalent sigmoid evaluation from the 2025 Torch port.
+            result *= expit(3.6*(w*math.sqrt(p.depth/p.gravity)-1.125))
     return np.where(np.asarray(omega) > 0, result, 0.0)
 
 
