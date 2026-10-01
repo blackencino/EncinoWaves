@@ -19,7 +19,7 @@ args = parser.parse_args()
 streaks = args.detail == "streaks"
 parameters = Wave_parameters(resolution=1024,wind_speed=24,swell=.8) if streaks else Wave_parameters(resolution=1024)
 waves = make_edited_state(parameters)
-foam_parameters = Foam_parameters()
+foam_parameters = Foam_parameters(windrows=.45 if streaks else 0)
 start,preroll = (60,60) if streaks else (10,8)
 print(f"Building {preroll} seconds of foam history on {waves.device}",flush=True)
 foam = prepare_foam(waves,start,foam_parameters,preroll=preroll)

@@ -17,7 +17,7 @@ args=parser.parse_args()
 if args.frames < 1: parser.error("frames must be positive")
 waves=make_edited_state(Wave_parameters(resolution=args.resolution,
     wind_speed=24 if args.streaks else 17,swell=.8 if args.streaks else .35),args.device)
-p=Foam_parameters(resolution=args.foam_resolution)
+p=Foam_parameters(resolution=args.foam_resolution,windrows=.45 if args.streaks else 0)
 foam=None
 times=[]
 for i in range(args.frames+3):

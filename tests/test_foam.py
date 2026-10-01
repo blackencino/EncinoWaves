@@ -100,7 +100,7 @@ def test_flat_display_crest_map_does_not_amplify_sub_texel_residuals(device):
 
 def test_foam_checkpoint_replays_and_survives_wave_resolution_change(device,tmp_path):
     waves = make_initial_state(Wave_parameters(resolution=32,wind_speed=24,swell=.8),device)
-    p = Foam_parameters(resolution=32)
+    p = Foam_parameters(resolution=32,windrows=.45)
     state = prepare_foam(waves,10,p,preroll=.2)
     repeated = prepare_foam(waves,10,p,preroll=.2)
     torch.testing.assert_close(state.density,repeated.density,atol=0,rtol=0)
@@ -171,7 +171,7 @@ def test_low_frequency_warp_moves_existing_streaks_without_new_emission(device):
 
 
 def test_streaks_need_strong_wind_and_swell_and_fade_after_gate_closes(device):
-    p = Foam_parameters(resolution=32,breakup=0)
+    p = Foam_parameters(resolution=32,breakup=0,windrows=.45)
     strong = Wave_parameters(resolution=32,wind_speed=24,swell=.8)
     for waves in (replace(strong,swell=.5),replace(strong,wind_speed=13.9)):
         state = make_foam_state(waves,0,p,device)

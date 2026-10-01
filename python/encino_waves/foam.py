@@ -29,7 +29,7 @@ class Foam_parameters:
     breakup: float = 1.0
     noise_scale: float = 24.0         # metres, rounded to a periodic cell count
     noise_speed: float = .12          # radians/second
-    windrows: float = .45             # 0..1; up to 8% of surface emission in strong seas
+    windrows: float = 0.0             # deferred experiment; explicit opt-in only
     windrow_spacing: float = 32.0     # metres, rounded to periodic bands
     windrow_half_life: float = 45.0   # seconds, separate from fresh whitecaps
     windrow_gathering: float = .35    # crosswind convergence speed, m/s

@@ -271,11 +271,16 @@ emission remains 1.2/s with full fractal breakup.
 
 ### Wind streaks and deformation
 
+This experiment is deferred: the bands remain too regular, appear as soft lines
+with texture overlaid, and do not deform enough over time. The default amount is
+zero. The code and explicit preview/benchmark options remain for future study
+with better reference; the regular foam and fresh-crest shading are unchanged.
+
 `Foam_state.windrows` is an optional float32 surface residue field: another 1 MiB
 at 512², allocated only once the strong-sea gate opens. Its source is diverted
 from existing surface emission, so the total emitted amount is unchanged. The
 fraction is `0.08 * windrows * smoothstep(13.9,20.7,wind_speed) *
-smoothstep(0.5,0.8,swell)`, with the amount control defaulting to 0.45. Wind
+smoothstep(0.5,0.8,swell)`. The experimental preview opts in at 0.45. Wind
 thresholds correspond to Beaufort 7–8, whose descriptions include wind-aligned
 foam streaks. The swell gate and strength are artistic choices, not a calibrated
 physical law. Langmuir convergence is another relevant mechanism; this model

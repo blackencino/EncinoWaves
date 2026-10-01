@@ -45,6 +45,7 @@ try:
     assert viewer.state.parameters.depth == 8
     assert viewer.state.phase_steps
     assert viewer.comparison_state.phase is viewer.state.phase
+    viewer.foam_parameters=replace(viewer.foam_parameters,windrows=.45)
     viewer.foam_state=prepare_foam(viewer.state,viewer.time,viewer.foam_parameters,preroll=1)
     viewer.comparison_foam_state=prepare_foam(viewer.comparison_state,viewer.time,viewer.foam_parameters,preroll=1)
     assert float(viewer.foam_state.density.sum().cpu()) > 0

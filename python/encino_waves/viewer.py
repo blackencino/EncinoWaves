@@ -491,7 +491,7 @@ class Viewer:
             if imgui.is_item_hovered(): imgui.set_tooltip("Breakup of fresh crests only. Lower values keep the crests more continuous without changing foam emission.")
             changed,value=imgui.slider_float("Wind streaks",self.foam_parameters.windrows,0,1,"%.2f")
             if changed: self.foam_parameters=replace(self.foam_parameters,windrows=value)
-            if imgui.is_item_hovered(): imgui.set_tooltip("Long-lived foam gathers along the wind. Builds with Beaufort 7-8 winds and swell above 0.5. Zero disables and clears the streaks.")
+            if imgui.is_item_hovered(): imgui.set_tooltip("Experimental; disabled by default. Zero clears streak history while preserving the regular foam.")
             if imgui.tree_node("Streak controls"):
                 for label,name,lo,hi,fmt in (("Spacing","windrow_spacing",8,128,"%.0f m"),
                         ("Streak lifetime","windrow_half_life",5,180,"%.0f s"),
