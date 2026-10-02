@@ -9,20 +9,25 @@ import numpy as np
 import torch
 import wgpu
 from .model import texture_arrays
-from .sky import load_sky
+from .sky import load_sky, ocean_dome
+from .lighting import analyze_sky
+from .environment import prefilter_environment
+from .foam_material import Foam_material, FOAM_SURFACE_WGSL
+from .foam_detail import Foam_detail, FOAM_DETAIL_WGSL
 from .camera import Camera
 
 
 @dataclass(frozen=True)
 class Look:
-    exposure: float = 0.0
-    sky_rotation: float = 0.0
-    sky_gain: float = 2.0
-    haze: float = 1.0
+    exposure: float = 0.55
+    sky_rotation: float = 25.0
+    sky_gain: float = 1.0
+    haze: float = 0.9
     foam: float = 1.0
     crest_threshold: float = 0.5
     crest_maximum: float = 1.1
     aeration: float = 1.25
+    material: str = "physical"
 
     @classmethod
     def from_dict(cls, values):
@@ -54,7 +59,7 @@ def make_device(canvas=None):
 
 class Ocean_renderer:
     """Owns graphics resources only; the core model has no renderer dependency."""
-    def __init__(self, device, sky=None, mesh_resolution=(640,384), target_format="rgba8unorm", transfer=None):
+    def __init__(self, device, sky=None, mesh_resolution=(640,384), target_format="rgba8unorm", transfer=None, sample_count=4):
         self.device = device
         self.transfer_mode = transfer or os.environ.get("ENCINO_WAVES_TRANSFER","auto")
         if self.transfer_mode not in ("auto","metal","host"):
@@ -62,13 +67,20 @@ class Ocean_renderer:
         self.gpu_transfer = None
         self.transfer_device = None
         self.format = target_format
+        if sample_count not in (1,4):
+            raise ValueError("Antialiasing sample count must be 1 or 4")
+        self.sample_count = sample_count
         self.mesh_resolution = mesh_resolution
-        self.uniform = device.create_buffer(size=192, usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
+        self.uniform = device.create_buffer(size=496, usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
         self.wave_sampler = device.create_sampler(address_mode_u="repeat", address_mode_v="repeat",
-                                                 mag_filter="linear", min_filter="linear", mipmap_filter="linear")
+                                                 mag_filter="linear", min_filter="linear", mipmap_filter="linear",
+                                                 max_anisotropy=8)
+        self.legacy_wave_sampler = device.create_sampler(address_mode_u="repeat",address_mode_v="repeat",
+            mag_filter="linear",min_filter="linear",mipmap_filter="linear")
         self.sky_sampler = device.create_sampler(address_mode_u="repeat", address_mode_v="clamp-to-edge",
                                                 mag_filter="linear", min_filter="linear", mipmap_filter="linear")
-        shader = device.create_shader_module(code=(Path(__file__).parent/"shaders/ocean.wgsl").read_text())
+        shader = device.create_shader_module(code=FOAM_SURFACE_WGSL+"\n"+FOAM_DETAIL_WGSL+"\n"+
+            (Path(__file__).parent/"shaders/ocean.wgsl").read_text())
         # Explicit layout is shared by both pipelines, including unused entries.
         self.layout = device.create_bind_group_layout(entries=[
             {"binding":0,"visibility":3,"buffer":{"type":"uniform"}},
@@ -78,18 +90,34 @@ class Ocean_renderer:
             {"binding":4,"visibility":2,"sampler":{"type":"filtering"}},
             {"binding":5,"visibility":2,"texture":{"sample_type":"float"}},
             {"binding":6,"visibility":2,"texture":{"sample_type":"float"}},
+            {"binding":7,"visibility":2,"texture":{"sample_type":"float"}},
+            {"binding":8,"visibility":2,"texture":{"sample_type":"float"}},
+            {"binding":9,"visibility":2,"texture":{"sample_type":"float"}},
         ])
         layout = device.create_pipeline_layout(bind_group_layouts=[self.layout])
         self.sky_pipeline = device.create_render_pipeline(layout=layout,
             vertex={"module":shader,"entry_point":"sky_vertex"},
-            fragment={"module":shader,"entry_point":"sky_fragment","targets":[{"format":target_format}]},
+            fragment={"module":shader,"entry_point":"sky_fragment","targets":[{"format":"rgba16float"}]},
             primitive={"topology":"triangle-list"},
+            multisample={"count":sample_count},
             depth_stencil={"format":"depth32float","depth_write_enabled":False,"depth_compare":"always"})
         self.ocean_pipeline = device.create_render_pipeline(layout=layout,
             vertex={"module":shader,"entry_point":"ocean_vertex"},
-            fragment={"module":shader,"entry_point":"ocean_fragment","targets":[{"format":target_format}]},
+            fragment={"module":shader,"entry_point":"ocean_fragment","targets":[{"format":"rgba16float"}]},
             primitive={"topology":"triangle-list","cull_mode":"none"},
+            multisample={"count":sample_count},
             depth_stencil={"format":"depth32float","depth_write_enabled":True,"depth_compare":"less"})
+        self.pipeline_layout = layout
+        self.legacy_pipelines = None
+        presentation = device.create_shader_module(code=(Path(__file__).parent/"shaders/presentation.wgsl").read_text())
+        self.presentation_pipeline = device.create_render_pipeline(layout="auto",
+            vertex={"module":presentation,"entry_point":"vertex"},
+            fragment={"module":presentation,"entry_point":"fragment","targets":[{"format":target_format}]})
+        self.presentation_sampler = device.create_sampler(mag_filter="linear",min_filter="linear")
+        self.hdr = None
+        self.multisample = None
+        self.presentation_group = None
+        self.depth_sample_count = 0
         mip_shader = device.create_shader_module(code=(Path(__file__).parent/"shaders/mipmap.wgsl").read_text())
         self.mip_pipeline = device.create_render_pipeline(layout="auto",
             vertex={"module":mip_shader,"entry_point":"vertex"},
@@ -108,17 +136,28 @@ class Ocean_renderer:
         self._write_texture(self.foam_texture,np.zeros((1,1,4),np.float16))
         self.foam_mips = []
         self.foam_dirty = False
+        self.foam_material = Foam_material(device)
+        self.foam_material_texture = None
+        self.foam_material_strength = None
+        self.foam_material_dirty = True
+        self.foam_detail = Foam_detail(device)
         self.foam_grain_basis = None
         self.foam_grain = None
-        sky_pixels,self.sky_name = load_sky(sky)
+        raw_sky,self.sky_name = load_sky(sky)
+        self.raw_sky = raw_sky
+        self.sky_peak = float(np.max(raw_sky[...,:3]))
+        sky_pixels = ocean_dome(raw_sky,horizon_trim_degrees=10.0)
+        self.lighting = analyze_sky(sky_pixels)
         self.sky = self._make_texture(sky_pixels.shape[1],sky_pixels.shape[0])
-        self.sky_storage_scale=max(1.0,float(np.max(sky_pixels[...,:3]))/60000)
+        self.sky_storage_scale=max(1.0,float(np.max(raw_sky[...,:3]))/60000,
+                                   float(np.max(sky_pixels[...,:3]))/60000)
         self._write_texture(self.sky,(sky_pixels/self.sky_storage_scale).astype(np.float16))
         encoder = device.create_command_encoder()
         self._mipmaps(encoder,self._make_mip_groups(self.sky))
         device.queue.submit([encoder.finish()])
+        self.reflection_texture = prefilter_environment(device,self.sky)
         # Dominant upper-hemisphere light and broad light color, in linear HDR.
-        rgb = sky_pixels[...,:3]
+        rgb = raw_sky[...,:3]
         luminance = rgb@np.array([.2126,.7152,.0722])
         luminance[luminance.shape[0]//2:] = 0
         yy,xx = np.unravel_index(np.argmax(luminance),luminance.shape)
@@ -129,6 +168,36 @@ class Ocean_renderer:
         self.moon_color = rgb[yy,(xx+rgb.shape[1]//2)%rgb.shape[1]].copy()
         self.statistics_parameters = None
         self.frame = None
+        self.active_material = "physical"
+        self.legacy_sky = None
+        self.presentation_sky = self.sky
+
+    def _select_material(self,material):
+        if material not in ("physical","2015"):
+            raise ValueError("Material must be physical or 2015")
+        if material == "2015" and self.legacy_pipelines is None:
+            shader = self.device.create_shader_module(code=(Path(__file__).parent/"shaders/ocean_2015.wgsl").read_text())
+            sky = self.device.create_render_pipeline(layout=self.pipeline_layout,
+                vertex={"module":shader,"entry_point":"sky_vertex"},
+                fragment={"module":shader,"entry_point":"sky_fragment","targets":[{"format":self.format}]},
+                primitive={"topology":"triangle-list"},
+                depth_stencil={"format":"depth32float","depth_write_enabled":False,"depth_compare":"always"})
+            ocean = self.device.create_render_pipeline(layout=self.pipeline_layout,
+                vertex={"module":shader,"entry_point":"ocean_vertex"},
+                fragment={"module":shader,"entry_point":"ocean_fragment","targets":[{"format":self.format}]},
+                primitive={"topology":"triangle-list","cull_mode":"none"},
+                depth_stencil={"format":"depth32float","depth_write_enabled":True,"depth_compare":"less"})
+            self.legacy_pipelines = sky,ocean
+            self.legacy_sky = self._make_texture(self.raw_sky.shape[1],self.raw_sky.shape[0])
+            self._write_texture(self.legacy_sky,(self.raw_sky/self.sky_storage_scale).astype(np.float16))
+            encoder = self.device.create_command_encoder()
+            self._mipmaps(encoder,self._make_mip_groups(self.legacy_sky))
+            self.device.queue.submit([encoder.finish()])
+        if material != self.active_material:
+            self.active_material = material
+            self.sky = self.presentation_sky if material=="physical" else self.legacy_sky
+            self._bind_textures()
+        return (self.sky_pipeline,self.ocean_pipeline) if material=="physical" else self.legacy_pipelines
 
     def _make_texture(self,width,height):
         return self.device.create_texture(size=(width,height,1),format="rgba16float",
@@ -230,12 +299,15 @@ class Ocean_renderer:
         if not self.wave_textures: return
         self.bind_group = self.device.create_bind_group(layout=self.layout,entries=[
             {"binding":0,"resource":{"buffer":self.uniform}},
-            {"binding":1,"resource":self.wave_sampler},
+            {"binding":1,"resource":self.legacy_wave_sampler if self.active_material=="2015" else self.wave_sampler},
             {"binding":2,"resource":self.wave_textures[0].create_view()},
             {"binding":3,"resource":self.wave_textures[1].create_view()},
             {"binding":4,"resource":self.sky_sampler},
             {"binding":5,"resource":self.sky.create_view()},
             {"binding":6,"resource":self.foam_texture.create_view()},
+            {"binding":7,"resource":self.reflection_texture.create_view()},
+            {"binding":8,"resource":(self.foam_material_texture or self.foam_texture).create_view()},
+            {"binding":9,"resource":self.foam_detail.view},
         ])
 
     def upload_foam(self,state):
@@ -254,6 +326,7 @@ class Ocean_renderer:
         if self.gpu_transfer:
             self.gpu_transfer.upload_foam(state,self.foam_texture)
             self.foam_dirty = True
+            self.foam_material_dirty = True
             return
         rgb = state.density.permute(1,2,0).cpu().numpy()
         data = np.zeros((*rgb.shape[:2],4),np.float16)
@@ -267,6 +340,7 @@ class Ocean_renderer:
         data[...,3] = self.foam_grain
         self._write_texture(self.foam_texture,data)
         self.foam_dirty = True
+        self.foam_material_dirty = True
 
     @property
     def shading_statistics(self):
@@ -277,29 +351,60 @@ class Ocean_renderer:
         self.crest_gain=statistics.crest_gain
         self.crest_bias=statistics.crest_bias
 
+    def _render_targets(self,width,height,sample_count,physical):
+        if (self.depth is None or self.depth.size[:2] != (width,height)
+                or self.depth_sample_count != sample_count):
+            if self.depth: self.depth.destroy()
+            self.depth = self.device.create_texture(size=(width,height,1),format="depth32float",
+                sample_count=sample_count,usage=wgpu.TextureUsage.RENDER_ATTACHMENT)
+            self.depth_sample_count = sample_count
+        if physical and (self.hdr is None or self.hdr.size[:2] != (width,height)):
+            if self.hdr: self.hdr.destroy()
+            if self.multisample: self.multisample.destroy()
+            self.hdr = self.device.create_texture(size=(width,height,1),format="rgba16float",
+                usage=wgpu.TextureUsage.RENDER_ATTACHMENT|wgpu.TextureUsage.TEXTURE_BINDING|wgpu.TextureUsage.COPY_SRC)
+            self.multisample = self.device.create_texture(size=(width,height,1),format="rgba16float",
+                sample_count=self.sample_count,usage=wgpu.TextureUsage.RENDER_ATTACHMENT) if self.sample_count>1 else None
+            self.presentation_group = self.device.create_bind_group(
+                layout=self.presentation_pipeline.get_bind_group_layout(0),entries=[
+                    {"binding":0,"resource":self.hdr.create_view()},
+                    {"binding":1,"resource":self.presentation_sampler},
+                    {"binding":2,"resource":{"buffer":self.uniform}}])
+
     def draw(self,target_view,width,height,camera=Camera(),look=Look(),viewport=None,clear=True):
         if self.frame is None:
             raise RuntimeError("Upload a wave frame before drawing")
-        if self.depth is None or self.depth.size[:2] != (width,height):
-            if self.depth:
-                self.depth.destroy()
-            self.depth = self.device.create_texture(size=(width,height,1),format="depth32float",usage=wgpu.TextureUsage.RENDER_ATTACHMENT)
+        sky_pipeline,ocean_pipeline = self._select_material(look.material)
+        physical = look.material == "physical"
+        # Each side of a comparison resolves its own linear HDR image. The final
+        # display pass composites only that viewport, preserving the other side.
+        render_width,render_height = tuple(map(int,viewport[2:])) if physical and viewport else (width,height)
+        self._render_targets(render_width,render_height,self.sample_count if physical else 1,physical)
         forward,right,up = camera.basis()
         aspect = (viewport[2]/viewport[3]) if viewport else width/height
         rotation = math.radians(look.sky_rotation)
         ocean_rotation = math.radians(self.frame.parameters.wind_direction % 360)
-        sx,sy,sz = self.sun_direction
+        sx,sy,sz = self.sun_direction if look.material=="2015" else self.lighting.dominant_direction
         sun = (sx*math.cos(rotation)+sy*math.sin(rotation),sy*math.cos(rotation)-sx*math.sin(rotation),sz)
+        # Keep all intermediate radiance inside half-float range. The display
+        # pass reverses this storage normalization before its highlight shoulder,
+        # so even a very bright HDR sun remains recoverable at low exposure.
+        hdr_scale = max(1.0,self.sky_peak*look.sky_gain/32000) if physical else 1.0
+        lighting_gain = look.sky_gain/hdr_scale
         uniform = np.array([
             [camera.x,camera.y,camera.height,self.frame.time],
             [*forward,math.tan(math.radians(camera.fov)/2)],
-            [*right,aspect],[*up,look.exposure],
+            [*right,aspect],[*up,look.exposure+math.log2(hdr_scale)],
             [self.frame.parameters.domain,self.wave_size,look.crest_threshold,look.foam],
-            [rotation,look.haze,look.sky_gain*self.sky_storage_scale,ocean_rotation],[*sun,0],[*(self.sun_color*look.sky_gain),0],
+            [rotation,look.haze,lighting_gain*self.sky_storage_scale,ocean_rotation],[*sun,0],
+            [*((self.sun_color if look.material=="2015" else self.lighting.direct_irradiance)*lighting_gain),0],
             [*self.mesh_resolution,.5,30000],
             [self.big_height,self.crest_gain,self.crest_bias,look.crest_maximum],
             [*(self.moon_color*look.sky_gain),0],
             [float(self.foam_state is not None),look.aeration,0,0],
+            [.025,float(self.reflection_texture.mip_level_count-1),20000,0],
+            *[[*(coefficient*lighting_gain),0] for coefficient in self.lighting.diffuse_sh],
+            *[[*(coefficient*lighting_gain),0] for coefficient in self.lighting.ambient_sh],
         ],np.float32)
         self.device.queue.write_buffer(self.uniform,0,uniform)
         encoder = self.device.create_command_encoder()
@@ -309,21 +414,45 @@ class Ocean_renderer:
             self.mips_dirty = False
         if self.foam_dirty:
             self._mipmaps(encoder,self.foam_mips)
+        if physical and (self.foam_material_dirty or self.foam_material_strength != look.foam):
+            material_texture = self.foam_material.update(encoder,self.foam_texture,look.foam)
+            if material_texture is not self.foam_material_texture:
+                self.foam_material_texture = material_texture
+                self._bind_textures()
+            self.foam_material_strength = look.foam
+            self.foam_material_dirty = False
+        if self.foam_dirty:
             self.foam_dirty = False
-        render_pass = encoder.begin_render_pass(color_attachments=[
-            {"view":target_view,"clear_value":(0,0,0,1),"load_op":"clear" if clear else "load","store_op":"store"}],
+        attachment = {"view":target_view,"clear_value":(0,0,0,1),
+                      "load_op":"clear" if clear else "load","store_op":"store"}
+        if physical:
+            attachment.update(view=(self.multisample or self.hdr).create_view(),load_op="clear")
+            if self.multisample:
+                attachment.update(resolve_target=self.hdr.create_view(),store_op="discard")
+        render_pass = encoder.begin_render_pass(color_attachments=[attachment],
             depth_stencil_attachment={"view":self.depth.create_view(),"depth_clear_value":1.0,
                                       "depth_load_op":"clear","depth_store_op":"store"})
-        if viewport:
+        if viewport and not physical:
             render_pass.set_viewport(*viewport,0,1)
             render_pass.set_scissor_rect(*(int(v) for v in viewport))
         render_pass.set_bind_group(0,self.bind_group)
-        render_pass.set_pipeline(self.sky_pipeline)
+        render_pass.set_pipeline(sky_pipeline)
         render_pass.draw(3)
-        render_pass.set_pipeline(self.ocean_pipeline)
+        render_pass.set_pipeline(ocean_pipeline)
         render_pass.set_index_buffer(self.indices,"uint32")
         render_pass.draw_indexed(self.index_count)
         render_pass.end()
+        if physical:
+            render_pass = encoder.begin_render_pass(color_attachments=[{
+                "view":target_view,"clear_value":(0,0,0,1),
+                "load_op":"clear" if clear else "load","store_op":"store"}])
+            if viewport:
+                render_pass.set_viewport(*viewport,0,1)
+                render_pass.set_scissor_rect(*(int(v) for v in viewport))
+            render_pass.set_pipeline(self.presentation_pipeline)
+            render_pass.set_bind_group(0,self.presentation_group)
+            render_pass.draw(3)
+            render_pass.end()
         if self.gpu_transfer: self.gpu_transfer.before_graphics()
         self.device.queue.submit([encoder.finish()])
 

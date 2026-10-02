@@ -12,6 +12,9 @@ struct Uniforms {
     statistics: vec4f,   // big height, crest gain, crest bias, max crest
     moon_color: vec4f,
     aeration: vec4f,      // use foam history, subsurface strength, unused, unused
+    optics: vec4f,        // unresolved RMS slope, max environment mip, visibility metres, unused
+    diffuse_sh: array<vec4f,9>, // cosine-convolved radiance, already divided by pi
+    ambient_sh: array<vec4f,9>, // same, with the compact direct source removed
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var wave_sampler: sampler;
@@ -20,6 +23,9 @@ struct Uniforms {
 @group(0) @binding(4) var sky_sampler: sampler;
 @group(0) @binding(5) var sky_texture: texture_2d<f32>;
 @group(0) @binding(6) var foam_texture: texture_2d<f32>;
+@group(0) @binding(7) var reflection_texture: texture_2d<f32>;
+@group(0) @binding(8) var foam_material: texture_2d<f32>;
+@group(0) @binding(9) var foam_detail_texture: texture_2d<f32>;
 const pi: f32 = 3.141592653589793;
 
 fn rotate_xy(v: vec2f, angle: f32) -> vec2f {
@@ -39,11 +45,17 @@ fn environment(direction: vec3f, level: f32) -> vec3f {
     return textureSampleLevel(sky_texture,sky_sampler,uv,level).rgb*u.environment.z;
 }
 
-// Original OceanTestShaders.cpp gammaCorrect(..., 2.2), with an explicit
-// photographic exposure control at zero by default. Target is UNORM, not sRGB.
-fn display_color(linear: vec3f) -> vec3f {
-    return pow(max(linear*exp2(u.up_exposure.w),vec3f(0.0)),vec3f(1.0/2.2));
+fn filtered_reflection(direction: vec3f, roughness: f32) -> vec3f {
+    let d=normalize(direction);
+    let uv=vec2f((atan2(d.y,d.x)+u.environment.x)/(2.0*pi)+0.5,
+                 acos(clamp(d.z,-1.0,1.0))/pi);
+    return textureSampleLevel(reflection_texture,sky_sampler,uv,roughness*u.optics.y).rgb*u.environment.z;
 }
+
+fn horizon_radiance(direction: vec3f) -> vec3f {
+    return environment(normalize(vec3f(direction.xy,0.0)),5.0);
+}
+
 struct Sky_vertex { @builtin(position) position: vec4f, @location(0) ray: vec3f };
 @vertex fn sky_vertex(@builtin(vertex_index) index: u32) -> Sky_vertex {
     let x = f32((index << 1u) & 2u);
@@ -56,13 +68,21 @@ struct Sky_vertex { @builtin(position) position: vec4f, @location(0) ray: vec3f 
     return out;
 }
 @fragment fn sky_fragment(in: Sky_vertex) -> @location(0) vec4f {
-    return vec4f(display_color(environment(in.ray,0.0)),1.0);
+    let direction=normalize(in.ray);
+    // Sky and sea meet the same maritime haze limit. The photographic sky is
+    // blended only over the lowest two degrees, rather than ending in a seam.
+    let clear=smoothstep(0.0,.035,max(direction.z,0.0));
+    let sky=mix(horizon_radiance(direction),environment(direction,0.0),clear);
+    return vec4f(sky,1.0);
 }
 
 struct Ocean_vertex {
     @builtin(position) position: vec4f,
-    @location(0) world: vec3f,
-    @location(1) uv: vec2f,
+    // Tiny horizon triangles may cover MSAA samples without covering the pixel
+    // center. Centroid sampling prevents extrapolation behind the camera and
+    // the resulting flashes of the opposite horizon's fog/reflection color.
+    @location(0) @interpolate(perspective, centroid) world: vec3f,
+    @location(1) @interpolate(perspective, centroid) uv: vec2f,
 };
 @vertex fn ocean_vertex(@builtin(vertex_index) index: u32) -> Ocean_vertex {
     let nx = u32(u.grid.x)+1u;
@@ -94,109 +114,133 @@ struct Ocean_vertex {
     return out;
 }
 
-// Direct WGSL port of g_fragmentShaderTextureSkyBase in
-// src/EncinoWaves/Tests/OceanTestShaders.cpp (2015), including its artistic
-// constants. Changes are confined to guarding singular denominators and the
-// display / texture coordinate conventions required by WebGPU.
-fn linstep(low: f32, high: f32, value: f32) -> f32 {
-    return clamp((value-low)/max(high-low,1e-8),0.0,1.0);
-}
-struct Refraction { reflection: vec3f, transmission: vec3f, kr: f32, kt: f32 };
-fn my_refract(incident: vec3f, normal: vec3f) -> Refraction {
-    let ni=1.0;
-    let nt=1.3;
-    let eta=ni/nt;
-    let view=-incident;
-    let ci=dot(view,normal);
-    let a=view-ci*normal;
-    let b=-eta*a;
-    let si=sqrt(clamp(1.0-ci*ci,0.0,1.0));
-    let st=eta*si;
-    let ct=sqrt(clamp(1.0-st*st,0.0,1.0));
-    let rs=(ni*ci-nt*ct)/(ni*ci+nt*ct);
-    let rp=(ni*ct-nt*ci)/(ni*ct+nt*ci);
-    let kr=(rp*rp+rs*rs)/2.0;
-    return Refraction(normalize(view-2.0*a),normalize(b-ct*normal),kr,(1.0-kr)/(eta*eta));
-}
-fn hg_phase(g: vec3f, theta: f32) -> vec3f {
-    return (vec3f(1.0)-g*g)/(4.0*3.141592*pow(vec3f(1.0)+g*g-2.0*g*cos(theta),vec3f(1.5)));
-}
-fn full_extinction_color(light_color: vec3f, extinction: vec3f,
-                         scattering: vec3f, phase_g: vec3f,
-                         to_light: vec3f, incident: vec3f,
-                         big_height: f32, world: vec3f) -> vec3f {
-    let ln=normalize(to_light);
-    let start_depth=max(big_height-world.z,.01)/u.ocean.x;
-    let theta=acos(clamp(dot(-incident,-ln),-1.0,1.0));
-    let hgp=hg_phase(phase_g,theta);
-    let iz=.1*abs(incident.z);
-    let lz=max(.1*abs(ln.z),1e-7);
-    let extincted=exp(-start_depth*extinction/lz)*lz/((iz+lz)*extinction);
-    let gain=linstep(-2.8*big_height,big_height,world.z);
-    return 10.0*5.25*gain*light_color*hgp*scattering*extincted;
-}
-fn layered_fog(color: vec3f, distance: f32, incident: vec3f) -> vec3f {
-    let beta=.1;
-    let iz=incident.z;
-    let bd=beta*iz*distance;
-    // Limit at the horizon is distance, avoiding the original 0/0.
-    let eye_height=max(0.0,u.eye_time.z+.4*u.statistics.x);
-    let start=exp(-beta*eye_height);
-    var k=distance*start;
-    if abs(bd)>1e-5 {
-        // Algebraically identical, without 0 * infinity from a high camera.
-        let end=exp(min(80.0,-beta*eye_height-bd));
-        k=max(0.0,(start-end)/(beta*iz));
+// Bounded dielectric surface with environment-lit foam and a homogeneous
+// water-medium approximation. Wave displacement, normals and history are inputs;
+// material changes never alter the synthesized wave field.
+fn sky_light(normal: vec3f,ambient: bool) -> vec3f {
+    let p=vec3f(rotate_xy(normal.xy,u.environment.x),normal.z);
+    let basis=array<f32,9>(.2820947918,.4886025119*p.y,.4886025119*p.z,.4886025119*p.x,
+        1.0925484306*p.x*p.y,1.0925484306*p.y*p.z,.3153915653*(3.0*p.z*p.z-1.0),
+        1.0925484306*p.x*p.z,.5462742153*(p.x*p.x-p.y*p.y));
+    var result=vec3f(0.0);
+    for(var i=0u;i<9u;i++) {
+        result+=select(u.diffuse_sh[i].rgb,u.ambient_sh[i].rgb,ambient)*basis[i];
     }
-    let density=1.5*vec3f(.0005,.0004,.00045)*u.environment.y;
-    let transmittance=exp(-k*density);
-    let fog=pow(vec3f(.75),vec3f(2.2));
-    return mix(fog,color,transmittance);
+    return max(result,vec3f(0.0));
 }
+
+fn sky_irradiance(normal: vec3f) -> vec3f { return sky_light(normal,false); }
+
+fn fresnel_dielectric(cosine: f32) -> f32 {
+    let ci=clamp(cosine,0.0,1.0);
+    let eta=1.0/1.333;
+    let ct=sqrt(max(0.0,1.0-eta*eta*(1.0-ci*ci)));
+    let rs=(ci-1.333*ct)/max(ci+1.333*ct,1e-6);
+    let rp=(ct-1.333*ci)/max(ct+1.333*ci,1e-6);
+    return clamp(.5*(rs*rs+rp*rp),0.0,1.0);
+}
+
+fn phase_hg(cosine: f32,g: f32) -> f32 {
+    let d=max(1e-4,1.0+g*g-2.0*g*clamp(cosine,-1.0,1.0));
+    return (1.0-g*g)/(4.0*pi*d*sqrt(d));
+}
+
+// Karis 2014, analytical split-sum environment BRDF. Input r is perceptual
+// roughness; the prefilter uses alpha=r*r. Fresnel is already included here.
+// https://www.unrealengine.com/blog/physically-based-shading-on-mobile
+fn environment_brdf(cosine: f32,roughness: f32) -> f32 {
+    let nv=clamp(cosine,0.0,1.0);
+    let r=roughness*vec4f(-1.0,-.0275,-.572,.022)+vec4f(1.0,.0425,1.04,-.04);
+    let q=min(r.x*r.x,exp2(-9.28*nv))*r.x+r.y;
+    let ab=vec2f(-1.04,1.04)*q+r.zw;
+    let fitted=clamp(.0203732*ab.x+ab.y,0.0,1.0);
+    // Recover the exact dielectric boundary for a resolved smooth surface.
+    return mix(fresnel_dielectric(nv),fitted,smoothstep(.0,.3,roughness));
+}
+
+fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
+    // Homogeneous maritime visibility, metres. Inscatter takes the actual
+    // horizon radiance in this view direction, eliminating the old gray seam.
+    let distance=length(world-u.eye_time.xyz);
+    let transmittance=exp(-3.912*distance*u.environment.y/u.optics.z);
+    let horizon=horizon_radiance(incident);
+    return mix(horizon,color,transmittance);
+}
+
 @fragment fn ocean_fragment(in: Ocean_vertex) -> @location(0) vec4f {
-    let incident=normalize(in.world-u.eye_time.xyz);
-    let normal=normalize(ocean_to_world(textureSample(normals,wave_sampler,in.uv).xyz));
-    let refracted=my_refract(incident,normal);
-    var reflection=refracted.reflection;
-    reflection.z=abs(reflection.z);
-    let sun=normalize(u.sun.xyz);
-    let moon=vec3f(-sun.x,-sun.y,sun.z);
-    let sun_color=u.sun_color.rgb;
-    let moon_color=u.moon_color.rgb;
-    let diffuse=.95*sun_color*max(dot(sun,normal),0.0)
-                +.35*moon_color*max(dot(moon,normal),0.0);
-    let sky=environment(reflection,0.0);
-    // RGB history: surface coverage, shallow aeration, deeper aeration. These
-    // densities move with the same ocean-space mesh and use its original media.
-    let density=max(textureSample(foam_texture,wave_sampler,in.uv).rgb,vec3f(0.0))*u.aeration.x*u.ocean.w;
+    let view=normalize(u.eye_time.xyz-in.world);
+    let averaged_normal=ocean_to_world(textureSample(normals,wave_sampler,in.uv).xyz);
+    let normal_length=clamp(length(averaged_normal),.01,1.0);
+    var normal=averaged_normal/normal_length;
+    // A filtered shading normal may face away although the triangle is visible.
+    // Reflect it about V (Bruneton et al. 2010) before evaluating Fresnel.
+    if dot(normal,view)<0.0 { normal=reflect(normal,view); }
+    normal=normalize(normal+view*1e-5);
+    let nv=clamp(dot(normal,view),0.0,1.0);
+    let reflection=reflect(-view,normal);
+    // Averaged normals encode unresolved variance. Carry it into reflection
+    // filtering instead of renormalizing away the distant wave energy.
+    let slope=sqrt(u.optics.x*u.optics.x+max(0.0,2.0*(1.0-normal_length)/normal_length));
+    let roughness=clamp(sqrt(slope),.04,.8);
+    let reflectance=environment_brdf(nv,roughness);
+    let reflected=filtered_reflection(reflection,roughness);
+    let raw_density=max(textureSample(foam_texture,wave_sampler,in.uv).rgb,vec3f(0.0));
+    let density=raw_density*u.aeration.x*u.ocean.w;
     let shallow=1.0-exp(-density.g*u.aeration.y*2.0);
     let deep_air=1.0-exp(-density.b*u.aeration.y);
-    let sigma=vec3f(3.3645,3.158,3.2428)+shallow*vec3f(1.8)+deep_air*vec3f(.8);
-    let scattering=vec3f(.1800,.1834,.2281)+shallow*vec3f(1.35,1.50,1.55)+deep_air*vec3f(.25,.65,.80);
-    let phase_g=mix(vec3f(.902,.825,.914),vec3f(.65),clamp(shallow+.5*deep_air,0.0,1.0));
-    let big_height=u.statistics.x;
-    let deep2=full_extinction_color(sun_color,sigma,scattering,phase_g,sun,incident,big_height,in.world)
-             +full_extinction_color(moon_color,sigma,scattering,phase_g,moon,incident,big_height,in.world);
-    let deep=.25*(1.0-.75*abs(refracted.transmission.z))
-             *linstep(-1.8*big_height,big_height,in.world.z)*sun_color*scattering*hg_phase(phase_g,.1*3.141592);
-    let half_vector=normalize(sun-incident);
-    let nh=dot(normal,half_vector);
-    let specular=sun_color*refracted.kr*.01*pow(nh*nh,400.0);
-    var color=refracted.kr*sky+specular+refracted.kt*deep2+.375*refracted.kt*deep+.001*diffuse;
-    if u.aeration.x>0.5 {
-        // Very dilute remnants are transparent; connected patches become an
-        // opaque foam layer instead of washing every ripple with white.
-        // Mip-filtered bubble-scale breakup is anchored to the ocean. Its
-        // average tends to one in the distance, without crawling pixel noise.
+    // Absorption/scattering are in inverse metres; added bubbles increase both
+    // scattering and extinction, keeping the single-scattering albedo bounded.
+    let sigma_a=vec3f(.22,.045,.018);
+    let sigma_s=vec3f(.006,.010,.009)+vec3f(1.2)*shallow+vec3f(.22)*deep_air;
+    let sigma_t=sigma_a+sigma_s;
+    let albedo=sigma_s/sigma_t;
+    let ambient=sky_light(normalize(vec3f(normal.xy*.25,1.0)),true);
+    var body=.33*ambient*albedo;
+    let sun=normalize(u.sun.xyz);
+    let nl=clamp(dot(normal,sun),0.0,1.0);
+    if nl>0.0 {
+        let inside_view=refract(-view,normal,1.0/1.333);
+        let inside_light=refract(-sun,normal,1.0/1.333);
+        let mu_view=max(.01,-dot(inside_view,normal));
+        let mu_light=max(.01,-dot(inside_light,normal));
+        let optical_thickness=max(.25,2.5-2.0*in.world.z/max(u.statistics.x,.01));
+        let attenuation=vec3f(1.0)-exp(-sigma_t*optical_thickness*(1.0/mu_view+1.0/mu_light));
+        let phase=phase_hg(dot(inside_light,-inside_view),mix(.85,.35,shallow));
+        // Entry conserves flux: E_water/E_air=(1-F)*nl/mu_light.
+        // The slab integral cancels mu_light; eta^2 converts its radiance back
+        // to air. Exit transmission is applied once with the body below.
+        let eta=1.0/1.333;
+        body+=u.sun_color.rgb*(1.0-fresnel_dielectric(nl))*eta*eta*albedo*phase
+              *nl/(mu_light+mu_view)*attenuation;
+    }
+    var color=reflectance*reflected+(1.0-reflectance)*body;
+    if u.aeration.x>.5 {
         let grain=textureSample(foam_texture,wave_sampler,in.uv*4.0).a;
-        let coverage=smoothstep(.07,.5,density.r*(.35+1.3*grain));
-        let foam_light=.35*diffuse+.45*environment(normalize(vec3f(normal.xy*.3,1.0)),4.0);
+        let close_material=foam_surface(raw_density,grain,u.ocean.w);
+        let filtered_material=textureSample(foam_material,wave_sampler,in.uv).rg;
+        let size=vec2f(textureDimensions(foam_texture));
+        let footprint=max(length(dpdx(in.uv)*size),length(dpdy(in.uv)*size));
+        // Coverage is integrated BEFORE filtering. A distant whitecap keeps its
+        // projected area instead of vanishing at a nonlinear threshold.
+        let material=mix(close_material,filtered_material,smoothstep(.6,1.5,footprint));
+        let coverage=clamp(material.x,0.0,1.0);
+        let fresh=clamp(material.y/max(coverage,1e-6),0.0,1.0);
+        // Foam is a diffuse scattering layer, illuminated by the whole sky.
+        // A sun glint may legitimately be brighter; never clamp foam to water.
+        let detail=textureSample(foam_detail_texture,wave_sampler,in.uv*u.ocean.x/4.0);
+        let foam_base_normal=normalize(vec3f(normal.xy*.65,max(normal.z,.15)));
+        let foam_normal=foam_detail_normal(foam_base_normal,detail,u.environment.w);
+        let resolved_roughness=mix(.6,.32,fresh);
+        let foam_roughness=min(.9,pow(pow(resolved_roughness,4.0)+.5*foam_detail_variance(detail),.25));
+        let foam_reflectance=environment_brdf(dot(foam_normal,view),foam_roughness);
+        let foam_albedo=mix(.58,.68,fresh)*detail.b;
+        let foam_light=(1.0-foam_reflectance)*foam_albedo*sky_irradiance(foam_normal)
+            +foam_reflectance*filtered_reflection(reflect(-view,foam_normal),foam_roughness);
         color=mix(color,foam_light,coverage);
     } else if u.ocean.z<u.statistics.w {
         let crest=textureSample(displacements,wave_sampler,in.uv).w*u.statistics.y+u.statistics.z;
-        color=mix(color,diffuse,smoothstep(u.ocean.z,u.statistics.w,crest)*u.ocean.w);
+        let coverage=smoothstep(u.ocean.z,u.statistics.w,crest)*u.ocean.w;
+        color=mix(color,.65*sky_irradiance(normal),coverage);
     }
-    let distance=1000.0*pow(length(in.world-u.eye_time.xyz)/1000.0,1.125);
-    color=layered_fog(color,distance,incident);
-    return vec4f(display_color(color),1.0);
+    return vec4f(atmosphere(color,in.world,-view),1.0);
 }

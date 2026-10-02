@@ -1,0 +1,17 @@
+EncinoWaves
+Copyright 2015-2026 Christopher Jon Horvath
+
+The display transform in python/encino_waves/shaders/presentation.wgsl
+adapts Khronos PBR Neutral from GLSL to WGSL, adds explicit exposure and
+sRGB output conversion, and is distributed under the Apache License 2.0.
+Upstream: https://github.com/KhronosGroup/ToneMapping
+License: https://github.com/KhronosGroup/ToneMapping/blob/main/LICENSE.md
+
+The analytical environment BRDF in ocean.wgsl follows Brian Karis's
+"Physically Based Shading on Mobile" (Epic Games, 2014), with a bounded
+dielectric smooth-surface limit. Epic's article permits use, modification,
+and distribution of its code samples.
+https://www.unrealengine.com/blog/physically-based-shading-on-mobile
+
+Commercial HDR environments are supplied separately by the user. No Dutch
+Skies images or other licensed environment data are distributed here.

@@ -76,3 +76,45 @@ def procedural_sky(width=2048):
     rgb += glow[...,None]*np.array([1,.76,.48])
     rgb[z<0] = [.13,.15,.17]
     return np.concatenate((rgb,np.ones((height,width,1),np.float32)),axis=-1)
+
+
+def ocean_dome(rgba, horizon_trim_degrees=8.0):
+    """Return a linear HDR ocean dome without the photographed ground.
+
+    The input is a north-to-south latitude/longitude image with pixel-centered
+    samples. The visible horizon samples ``horizon_trim_degrees`` above the
+    source horizon, tapering this angular offset to zero at the zenith. No
+    horizontal resampling, exposure adjustment, or color conversion is applied.
+
+    Below the horizon, each longitude extends its cleaned horizon color and
+    smoothly darkens to 20 percent at the nadir. Alpha is interpolated without
+    this attenuation. The source is never modified; the result is float32 RGBA.
+    """
+    source = np.asarray(rgba, dtype=np.float32)
+    if source.ndim != 3 or source.shape[-1] != 4 or source.shape[0] < 2 or source.shape[1] < 1:
+        raise ValueError("Sky dome requires an RGBA latitude/longitude image with at least two rows")
+    trim = float(horizon_trim_degrees)
+    if not math.isfinite(trim) or not 0 <= trim < 90:
+        raise ValueError("Horizon trim must be finite and in [0, 90) degrees")
+    if not np.isfinite(source).all():
+        raise ValueError("Sky dome source must contain only finite pixels")
+
+    height = source.shape[0]
+    latitude = math.pi/2 - (np.arange(height)+.5)*math.pi/height
+    trim = math.radians(trim)
+    source_latitude = trim + np.maximum(latitude, 0)*(1-trim/(math.pi/2))
+    source_y = (.5-source_latitude/math.pi)*height-.5
+    # Limit both interpolation taps to strictly positive source elevations.
+    # This also prevents ground leaking through a zero-trim horizon or tiny map.
+    last_sky_row = height//2-1
+    source_y = np.clip(source_y, 0, last_sky_row)
+    lower = np.floor(source_y).astype(np.intp)
+    upper = np.minimum(lower+1, last_sky_row)
+    weight = (source_y-lower).astype(np.float32)[:,None,None]
+    result = source[lower]*(1-weight) + source[upper]*weight
+
+    depth = np.maximum(-latitude/(math.pi/2), 0)
+    fade = (1-.8*depth*depth*(3-2*depth)).astype(np.float32)
+    result[...,:3] *= fade[:,None,None]
+    np.maximum(result, 0, out=result)
+    return result

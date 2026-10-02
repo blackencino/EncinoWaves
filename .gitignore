@@ -1,10 +1,10 @@
-.venv/
+.venv
 __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
 renders/*
 !renders/.gitkeep
-assets/local/
+assets/local
 imgui.ini
 .DS_Store
