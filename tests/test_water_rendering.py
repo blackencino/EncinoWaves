@@ -134,6 +134,31 @@ def test_sky_and_camera_rotation_preserve_the_image(renderer_factory):
     np.testing.assert_allclose(linear_hdr(renderer), before, rtol=.005, atol=.002)
 
 
+def test_wave_normal_bends_the_prefiltered_reflection(renderer_factory):
+    # Encode sky directions in RGB, then remove body lighting so this measures
+    # reflection alone. Opposite surface slopes should look into opposite sides
+    # of the sky even when the camera looks straight down.
+    theta=(np.arange(64)+.5)*math.pi/64
+    phi=(np.arange(128)+.5)*2*math.pi/128-math.pi
+    pixels=np.ones((64,128,4),np.float32)
+    pixels[...,0]=.5+.4*np.sin(theta)[:,None]*np.cos(phi)[None,:]
+    pixels[...,1]=.5+.4*np.sin(theta)[:,None]*np.sin(phi)[None,:]
+    pixels[...,2]=.5+.4*np.cos(theta)[:,None]
+    colors=[]
+    for tilt in (-.4,.4):
+        renderer=renderer_factory(pixels,normal=(tilt,0.,math.sqrt(1-tilt*tilt)))
+        renderer.lighting=replace(renderer.lighting,
+            ambient_sh=np.zeros_like(renderer.lighting.ambient_sh),
+            direct_irradiance=np.zeros_like(renderer.lighting.direct_irradiance))
+        renderer.render_image(65,65,replace(CAMERA,pitch=-90.),LOOK)
+        colors.append(linear_hdr(renderer)[32,32,:3])
+    negative,positive=colors
+    # Reflection bends through twice the surface tilt. Sampling the flat normal
+    # (or the normal direction itself) cannot produce this directional contrast.
+    assert (positive[0]-negative[0])/(positive[0]+negative[0]) > .45
+    np.testing.assert_allclose(positive[1:],negative[1:],rtol=.02,atol=1e-5)
+
+
 @pytest.mark.parametrize("samples", [1, 4])
 def test_compact_hdr_source_adds_finite_positive_scattering(renderer_factory, samples):
     theta = (np.arange(128)+.5)*math.pi/128

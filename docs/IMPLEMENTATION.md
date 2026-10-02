@@ -452,6 +452,15 @@ background. Trilinear/anisotropic filtering limits distant shimmer. The filtered
 environment reflection can look visibly smeared at steep downward angles; this
 limitation remains in the current presentation material.
 
+Reflection directions use smooth normals computed from the fully displaced
+surface, including horizontal pinch and the final trough blend. A directional
+RGB environment test isolates reflection from body lighting and verifies that
+opposite slopes bend the sky lookup through twice the surface tilt, including a
+straight-down camera. Matched reflection-only captures also compare these normals
+against a deliberately flat normal and normals calculated directly from the
+drawn triangles. Prefiltering broadens the reflection; it does not replace the
+wave-dependent lookup with a reflection of the base plane.
+
 `ocean_dome` reprojects the existing upper sky over the hemisphere. The renderer
 uses a 10-degree horizon trim: the tallest photographed turbine extended above
 8 degrees. Longitude and zenith are preserved. A small angular haze transition
@@ -661,7 +670,7 @@ describes minimum-eigenvalue emission and persistent, decaying whitecap textures
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
 exercised locally. After the spatial trough and camera fixes, the presentation
-branch passed 249 numerical and rendering checks, with 25 unavailable-device/
+branch passed 250 numerical and rendering checks, with 25 unavailable-device/
 reference skips. The UI check exercises camera events, continuous
 wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
 panels, including with the supplied Dutch Skies HDR. Direction edits preserve
