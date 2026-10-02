@@ -448,9 +448,10 @@ sampling and a spherical-area/PDF source footprint. The split-sum response is
 applied once. Shortening of filtered wave normals supplies a bounded unresolved
 slope estimate; it is an approximate mapping to GGX roughness, not an exact LEAN
 covariance reconstruction. The original full-resolution sky remains the visible
-background. Trilinear/anisotropic filtering limits distant shimmer. The filtered
-environment reflection can look visibly smeared at steep downward angles; this
-limitation remains in the current presentation material.
+background. Trilinear/anisotropic filtering limits distant shimmer. This remains
+a split-sum approximation; compact light sources can expose its lobe-shape error.
+The painted vertical light column and radial wedges reported in overhead views,
+however, were reproduced in the atmospheric haze alone, not the reflection.
 
 Reflection directions use smooth normals computed from the fully displaced
 surface, including horizontal pinch and the final trough blend. A directional
@@ -463,9 +464,24 @@ wave-dependent lookup with a reflection of the base plane.
 
 `ocean_dome` reprojects the existing upper sky over the hemisphere. The renderer
 uses a 10-degree horizon trim: the tallest photographed turbine extended above
-8 degrees. Longitude and zenith are preserved. A small angular haze transition
-and distance-based water fog meet the same azimuth-dependent horizon radiance.
-The raw licensed image stays unchanged and local.
+8 degrees. Longitude and zenith are preserved. Near atmospheric scattering uses
+the full three-dimensional viewing direction and a low-order Henyey–Greenstein
+convolution of sky radiance, with g=0.5. The existing diffuse SH coefficients are
+converted by band factors `[1, 0.75, 1]`: undo cosine convolution `[1, 2/3, 1/4]`,
+then apply the phase convolution `[1, g, g²]`. This truncated phase kernel remains
+nonnegative for every positive sky; a larger g is not automatically safe in SH9.
+The diffuse water and foam continue using their cosine-filtered lighting, and
+the specular sky filter is unchanged.
+
+The photographic horizon is an explicit boundary match only within five degrees
+of grazing and along optically long paths (smooth optical depth 0.5–2). Projecting
+that horizon strip into all fog rays previously painted the panorama's bright
+cloud opening down the water and produced azimuth-dependent wedges at nadir.
+The new airlight has a unique smooth nadir limit; a Metal regression extracts
+its contribution under a directional sky and tests convergence from four headings.
+Matched Dutch Skies captures isolate the old/new haze and complete material.
+The raw licensed image stays unchanged and local. The horizon match is a practical
+photographic boundary condition, not a full atmospheric multiple-scattering solve.
 
 ### Foam birth and material
 

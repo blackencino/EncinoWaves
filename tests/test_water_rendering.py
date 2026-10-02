@@ -159,6 +159,30 @@ def test_wave_normal_bends_the_prefiltered_reflection(renderer_factory):
     np.testing.assert_allclose(positive[1:],negative[1:],rtol=.02,atol=1e-5)
 
 
+def test_haze_converges_to_one_color_at_nadir_in_a_directional_sky(renderer_factory):
+    # The old horizon-strip projection painted a different fog color on each
+    # side of a straight-down image. A spherical scattering integral has one
+    # limit at the pole, even under a strongly directional HDR sky.
+    phi=(np.arange(128)+.5)*2*math.pi/128-math.pi
+    pixels=np.ones((64,128,4),np.float32)
+    pixels[...,0]=1+.85*np.cos(phi)
+    pixels[...,1]=1+.7*np.sin(phi)
+    renderer=renderer_factory(pixels)
+    airlight=[]
+    for yaw in (0,90,180,270):
+        camera=replace(CAMERA,height=1000.,pitch=-89.99,yaw=yaw)
+        renderer.render_image(65,65,camera,LOOK)
+        clear=linear_hdr(renderer)[32,32,:3]
+        renderer.render_image(65,65,camera,replace(LOOK,haze=.9))
+        fogged=linear_hdr(renderer)[32,32,:3]
+        distance=camera.height/-math.sin(math.radians(camera.pitch))
+        transmission=math.exp(-3.912*distance*.9/20000)
+        airlight.append((fogged-transmission*clear)/(1-transmission))
+    assert np.isfinite(airlight).all()
+    assert np.min(airlight)>0
+    np.testing.assert_allclose(airlight,np.broadcast_to(airlight[0],(4,3)),rtol=.015,atol=2e-5)
+
+
 @pytest.mark.parametrize("samples", [1, 4])
 def test_compact_hdr_source_adds_finite_positive_scattering(renderer_factory, samples):
     theta = (np.arange(128)+.5)*math.pi/128

@@ -53,7 +53,9 @@ fn filtered_reflection(direction: vec3f, roughness: f32) -> vec3f {
 }
 
 fn horizon_radiance(direction: vec3f) -> vec3f {
-    return environment(normalize(vec3f(direction.xy,0.0)),5.0);
+    // Only a horizon boundary condition, never a projected fog texture.
+    let horizontal=direction.xy/max(length(direction.xy),1e-6);
+    return environment(vec3f(horizontal,0.0)+vec3f(0.0,0.0,1e-6),5.0);
 }
 
 struct Sky_vertex { @builtin(position) position: vec4f, @location(0) ray: vec3f };
@@ -147,11 +149,15 @@ struct Ocean_vertex {
 // Bounded dielectric surface with environment-lit foam and a homogeneous
 // water-medium approximation. Wave displacement, normals and history are inputs;
 // material changes never alter the synthesized wave field.
-fn sky_light(normal: vec3f,ambient: bool) -> vec3f {
-    let p=vec3f(rotate_xy(normal.xy,u.environment.x),normal.z);
-    let basis=array<f32,9>(.2820947918,.4886025119*p.y,.4886025119*p.z,.4886025119*p.x,
+fn sky_basis(direction: vec3f) -> array<f32,9> {
+    let p=vec3f(rotate_xy(direction.xy,u.environment.x),direction.z);
+    return array<f32,9>(.2820947918,.4886025119*p.y,.4886025119*p.z,.4886025119*p.x,
         1.0925484306*p.x*p.y,1.0925484306*p.y*p.z,.3153915653*(3.0*p.z*p.z-1.0),
         1.0925484306*p.x*p.z,.5462742153*(p.x*p.x-p.y*p.y));
+}
+
+fn sky_light(normal: vec3f,ambient: bool) -> vec3f {
+    let basis=sky_basis(normal);
     var result=vec3f(0.0);
     for(var i=0u;i<9u;i++) {
         result+=select(u.diffuse_sh[i].rgb,u.ambient_sh[i].rgb,ambient)*basis[i];
@@ -160,6 +166,17 @@ fn sky_light(normal: vec3f,ambient: bool) -> vec3f {
 }
 
 fn sky_irradiance(normal: vec3f) -> vec3f { return sky_light(normal,false); }
+
+fn fog_radiance(direction: vec3f) -> vec3f {
+    // Low-order HG convolution (g=.5) of sky radiance, using the FULL viewing
+    // direction. Undo the stored Lambert kernel [1,2/3,1/4], then apply g^l.
+    // This is airlight, not diffuse surface irradiance or a specular sky mip.
+    let basis=sky_basis(direction);
+    let kernel=array<f32,9>(1.0,.75,.75,.75,1.0,1.0,1.0,1.0,1.0);
+    var result=vec3f(0.0);
+    for(var i=0u;i<9u;i++) { result+=u.diffuse_sh[i].rgb*basis[i]*kernel[i]; }
+    return max(result,vec3f(0.0));
+}
 
 fn fresnel_dielectric(cosine: f32) -> f32 {
     let ci=clamp(cosine,0.0,1.0);
@@ -189,12 +206,19 @@ fn environment_brdf(cosine: f32,roughness: f32) -> f32 {
 }
 
 fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
-    // Homogeneous maritime visibility, metres. Inscatter takes the actual
-    // horizon radiance in this view direction, eliminating the old gray seam.
+    // Homogeneous maritime visibility, metres. Near airlight is a smooth
+    // spherical convolution. Projecting a horizon strip into every direction
+    // painted radial wedges in nadir views and a false reflection of the sun.
     let distance=length(world-u.eye_time.xyz);
-    let transmittance=exp(-3.912*distance*u.environment.y/u.optics.z);
-    let horizon=horizon_radiance(incident);
-    return mix(horizon,color,transmittance);
+    let optical_depth=3.912*distance*u.environment.y/u.optics.z;
+    let transmittance=exp(-optical_depth);
+    let airlight=fog_radiance(incident);
+    // Keep the photographic sea/sky boundary at long grazing paths. This is
+    // an explicit horizon match; it fades out with elevation AND short paths.
+    let horizon_weight=(1.0-smoothstep(0.0,.0872,abs(incident.z)))*smoothstep(.5,2.0,optical_depth);
+    var inscatter=airlight;
+    if horizon_weight>0.0 { inscatter=mix(airlight,horizon_radiance(incident),horizon_weight); }
+    return mix(inscatter,color,transmittance);
 }
 
 @fragment fn ocean_fragment(in: Ocean_vertex) -> @location(0) vec4f {
