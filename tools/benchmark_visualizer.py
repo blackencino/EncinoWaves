@@ -21,6 +21,9 @@ from encino_waves.render import Look, Ocean_renderer, make_device
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--resolution",type=int,default=1024)
+    parser.add_argument("--domain",type=float,default=512.)
+    parser.add_argument("--foam-resolution",type=int,default=512)
+    parser.add_argument("--crest-crumble",action="store_true",help="Compare the optional crest material to the approved look")
     parser.add_argument("--width",type=int,default=1920)
     parser.add_argument("--height",type=int,default=1080)
     parser.add_argument("--frames",type=int,default=30)
@@ -33,17 +36,21 @@ def main():
     target=device.create_texture(size=(args.width,args.height,1),format="rgba8unorm",
                                  usage=wgpu.TextureUsage.RENDER_ATTACHMENT)
     target_view=target.create_view()
-    waves=make_edited_state(Wave_parameters(resolution=args.resolution))
+    waves=make_edited_state(Wave_parameters(resolution=args.resolution,domain=args.domain))
     frame=evaluate(waves,12)
     cases={"previous_viewer":(Look(material="2015",sky_gain=2,exposure=0,sky_rotation=0,haze=1),1),
            "presentation_1_sample":(Look(),1),"presentation_4_samples":(Look(),4)}
+    if args.crest_crumble:
+        cases={"approved":(Look(),4),"crest_crumble":(Look(crest_crumble=True),4)}
     initial_foam={name:prepare_foam(waves,12,Foam_parameters(
+        resolution=args.foam_resolution,
         emission_model="legacy" if name=="previous_viewer" else "compression"),preroll=.5) for name in cases}
     renderers={name:Ocean_renderer(device,sample_count=samples) for name,(_,samples) in cases.items()}
     for name,renderer in renderers.items():
         renderer.upload(frame)
         renderer.upload_foam(initial_foam[name])
     output={"graphics":dict(device.adapter.info),"resolution":args.resolution,
+            "foam_resolution":args.foam_resolution,"domain":args.domain,
             "width":args.width,"height":args.height,"frames":args.frames,"results":{}}
     for animation in (False,True):
         histories=initial_foam.copy()

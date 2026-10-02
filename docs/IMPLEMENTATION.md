@@ -539,43 +539,70 @@ The separate `academy/crest-crumble` branch adds an opt-in appearance study.
 `Look.crest_crumble` defaults to false; the viewer exposes one experimental
 checkbox. The approved presentation branch and its rendered master are unchanged.
 
-This samples the existing raw minimum horizontal stretch and begins slightly
-before the configured compression emitter. With the default source, onset is
-0.80 and full weight is 0.60, compared with deposition's 0.75/0.60. It is an
-instantaneous, reversible compression cue, not a detected one-way breaking event.
-Legacy emission cannot enable it. No spectrum, displacement, normal field,
-emission, RGB history, reset policy, FFT, texture allocation or transfer changes.
+The first version was visually ineffective: a faint reflection perturbation
+retired beyond a 0.65 m pixel footprint. The revised material forms visible,
+torn tongues on actively compressed crests. Raw minimum horizontal stretch
+provides the connected structure; coherent grain deforms its boundary and
+perforates the stronger roots. The existing periodic noise supplies roughly
+3 m and 0.75 m breakup at the reviewed 1 km domain / 1024 foam resolution.
+This scale depends on the foam noise settings and its resolution cap. There is
+no scrolling or per-frame randomization. It remains a reversible surface cue,
+not a detected one-way breaking event, spray simulation or silhouette change.
 
-The existing 6/16/42 cm material detail perturbs a separate wet reflection normal
-and roughness. Slope variance is scaled by the square of the normal amplitude;
-the reflection normal receives the same view-facing correction as the main water.
-Body lighting and established foam retain their original normals and shading.
-A sparse pale fringe uses the existing sky-lit foam radiance, with at most 9%
-blend on uncovered water. It is neither emission nor additive white. Applying
-the approved foam last automatically suppresses both additions by its coverage.
+The shared `crest_surface` function uses the configured compression threshold
+and width. Its maximum onset is threshold + 0.04 (bounded by 1); grain delays
+local onset and breaks up coverage, so most marks appear only in the stronger
+part of the emission interval. Coverage is exactly zero at zero compression,
+including extreme grain values. A 0.60 coverage cap lets the underlying wet
+response show through. This is artistic appearance tuning, not a new physical
+whitecap model. Legacy emission cannot enable it.
 
-Newly thresholded fringe coverage is not correctly filtered just because its
-input texture has mipmaps. This small prototype retires the effect as the pixel
-footprint grows from 0.12 to 0.65 metres, rather than widening its features or
-whitening the horizon. A visible distant fringe would need separate coverage
-integration and is outside this experiment. There is no scrolling or per-frame
-randomization. This suggests wet crinkling on the surface, not airborne spray
-or a crumbling silhouette.
+`Foam_material.A` stores the extra area `average((1-F)*C)`, where F is the
+approved history coverage and C the transient crest coverage. Their correlation
+must be integrated before mipmapping. The existing RGB coverage / freshness /
+grain moments retain their original quadrature and values. At the requested
+2048 waves / 1024 foam resolution, the existing 4x4 integration also resolves
+the new coverage. For larger ratios the alpha integration samples at least
+once per wave texel; it is bounded by the remaining material area. Linear mips
+preserve that area at distance. The close shader uses the same function, then
+switches to integrated coverage based on the wave footprint, independently of
+the history resolution.
 
-`tools/review_crest_crumble.py --seconds 4` generates matched native 4K stills and
-short paired clips for ordinary, chaotic, ordered, shallow, quiet and closer
-views, using exactly the same wave frames and foam history on both sides.
+Composition uses water*(1-F-extra) + old_foam*F + fresh_crest*extra, without
+suppressing the exclusive area a second time. The new material has its own
+fresh, sky-lit response, using the existing centimetre relief and unresolved
+slope variance. Its reflection normal receives a view-facing correction.
+Established foam retains its material. No spectrum, displacement, normal
+field, emission, RGB history, reset policy, FFT, GPU transfer or texture
+allocation changes are needed. Wave uploads and source edits invalidate the
+material even while history is paused; a dirty flag avoids retaining old wave
+tensors. Steady updates reuse views and bind groups without CPU field access.
+
+`tools/review_crest_crumble.py --seconds 4 --native-clips` generates matched
+2048-wave / 1024-foam stills and 1080p clips for ordinary, chaotic, ordered,
+shallow, quiet and closer views, using identical frames/history on both sides.
+Each case includes a viewer scene with the requested grids and crumble enabled;
+open it with `./run_viewer.command --scene renders/<review>/<case>/scene.json`.
+The scene rebuilds its foam during playback; the matched clips use a six-second
+preroll shared by both sides.
 Each pair returns to the disabled look and checks pixel equality, reprimes a
 transient first-use draw if necessary, and rejects an unstable comparison.
-GPU regressions check confinement to resolved compression, preservation of
-covered foam, configured-source thresholds, disabled appearance, bounded light,
-and bit-identical wave/foam inputs. The effect remains off pending artistic review;
-subtle numerical differences alone are not evidence of a better presentation.
-The independent still review found no clear improvement at the presentation
-cameras: the closer view adds faint granular shading, without a distinctly
-crumbling crest. It recommended keeping the approved render. This prototype is
-retained for comparison, not selected for the Academy film. Its branch passes
-271 tests, with 25 unavailable-device/reference skips.
+`tools/benchmark_visualizer.py --resolution 2048 --foam-resolution 1024
+--domain 1000 --crest-crumble` compares complete frame costs with GPU completion.
+GPU regressions cover area conservation, narrow-crest sampling, unchanged RGB
+moments, extreme grain, paused source/wave edits, reuse, bounded light and
+bit-identical wave/foam inputs. The independent still review found the revised
+crest fragments legible in ordinary and sunset views and recommended the
+reduced opacity for close views. The checkbox remains off pending artistic
+review; the approved presentation branch and master have not been changed.
+
+On this M2 Max, a 40-frame paired 1080p / 4-sample benchmark with 2048 waves,
+1024 foam and a 1 km domain measured 28.43 ms median for the approved animated
+frame and 29.90 ms with crumble (about 1.5 ms / 5% extra). Paused draws measured
+6.51 / 7.71 ms. These include GPU completion, waves, foam, transfer and display
+shading when animated; HDR setup, UI presentation and image readback are excluded.
+The full suite passed 278 tests with 25 unavailable-device/reference skips;
+the final material/rendering checks passed all 74 tests after filtering changes.
 
 ### References and checks
 

@@ -1,6 +1,6 @@
 """Matched optional-crest-material review; waves and RGB history are shared."""
 import argparse
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 import time
@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 from encino_waves.camera import look_at
 from encino_waves.editing import make_edited_state
-from encino_waves.export import Movie_writer
+from encino_waves.export import Movie_writer, _font
 from encino_waves.foam import Foam_parameters, prepare_foam, step_foam
 from encino_waves.model import Wave_parameters, evaluate
 from encino_waves.presets import presentation_views
@@ -21,10 +21,12 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output",type=Path,default=Path("renders/crest_crumble"))
     parser.add_argument("--cases",nargs="+",default=["ordinary","chaos","ordered","shallow","quiet","close"])
-    parser.add_argument("--resolution",type=int,default=4096)
-    parser.add_argument("--width",type=int,default=3840)
-    parser.add_argument("--height",type=int,default=2160)
+    parser.add_argument("--resolution",type=int,default=2048)
+    parser.add_argument("--foam-resolution",type=int,default=1024)
+    parser.add_argument("--width",type=int,default=1920)
+    parser.add_argument("--height",type=int,default=1080)
     parser.add_argument("--seconds",type=float,default=0.)
+    parser.add_argument("--native-clips",action="store_true",help="Also save each side at the full evaluation resolution")
     args=parser.parse_args()
     args.output.mkdir(parents=True,exist_ok=True)
     views=presentation_views(1000.)
@@ -37,18 +39,26 @@ def main():
         "quiet":(replace(base,wind_speed=5.),views[0].camera),
         "close":(base,look_at((150.,-150.,28.),fov=48.)),
     }
-    renderer=Ocean_renderer(make_device(),mesh_resolution=(1920,1152))
+    mesh_scale=max(1.,args.width/1920,args.height/1080)
+    renderer=Ocean_renderer(make_device(),mesh_resolution=(round(960*mesh_scale),round(576*mesh_scale)))
     off,on=Look(),Look(crest_crumble=True)
     results={}
     for name in args.cases:
         parameters,camera=cases[name]
         waves=make_edited_state(parameters)
-        foam=prepare_foam(waves,12.,Foam_parameters(resolution=1024),preroll=6.)
+        foam=prepare_foam(waves,12.,Foam_parameters(resolution=args.foam_resolution),preroll=6.)
         folder=args.output/name
         folder.mkdir(exist_ok=True)
+        scene={"parameters":asdict(parameters),"camera":asdict(camera),"look":asdict(on),
+               "foam":asdict(foam.parameters),"time":12.,"post_seed":True}
+        (folder/"scene.json").write_text(json.dumps(scene,indent=2)+"\n")
         movie=None
+        native_movies=[]
         if args.seconds>0:
             movie=Movie_writer(folder/"comparison.mp4",2560,760,24)
+            if args.native_clips:
+                native_movies=[Movie_writer(folder/(label+".mp4"),args.width,args.height,24)
+                               for label in ("approved","crumble")]
         start=time.perf_counter()
         complete=False
         warmed_pairs=0
@@ -76,7 +86,8 @@ def main():
                     Image.fromarray(baseline).save(folder/"approved.png")
                     Image.fromarray(candidate).save(folder/"crumble.png")
                     difference=np.abs(candidate.astype(np.int16)-baseline.astype(np.int16))[...,:3]
-                    results[name]={"mean_channel_difference":float(difference.mean()),
+                    results[name]={"wave_resolution":args.resolution,"foam_resolution":args.foam_resolution,
+                        "image_size":[args.width,args.height],"mean_channel_difference":float(difference.mean()),
                         "max_channel_difference":int(difference.max()),
                         "changed_pixels_over_2_levels_percent":float(100*np.mean(difference.max(axis=-1)>2))}
                     print(name,results[name],flush=True)
@@ -84,11 +95,14 @@ def main():
                     comparison=Image.new("RGB",(2560,760),(10,17,21))
                     for column,(pixels,label) in enumerate(((baseline,"Approved"),(candidate,"Optional crest crumble"))):
                         comparison.paste(Image.fromarray(pixels).convert("RGB").resize((1280,720),Image.Resampling.LANCZOS),(column*1280,40))
-                        ImageDraw.Draw(comparison).text((column*1280+20,12),name+" | "+label,fill="white")
+                        ImageDraw.Draw(comparison).text((column*1280+20,9),name+" | "+label,font=_font(22),fill="white")
                     movie.write(np.asarray(comparison))
+                    for writer,pixels in zip(native_movies,(baseline,candidate)):
+                        writer.write(pixels[...,:3])
             complete=True
         finally:
             if movie: movie.close(commit=complete)
+            for writer in native_movies: writer.close(commit=complete)
         results[name]["seconds"]=time.perf_counter()-start
         results[name]["warmed_pairs"]=warmed_pairs
         (args.output/"measurements.json").write_text(json.dumps(results,indent=2)+"\n")
