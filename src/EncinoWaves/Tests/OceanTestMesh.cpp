@@ -381,9 +381,7 @@ void Mesh::setWavesParams(const ewav::Parametersf& i_wparams) {
     // std::cout << "Gathered stats." << std::endl;
   } else {
     CHECK_PROP_CHANGE(troughDamping);
-    CHECK_PROP_CHANGE(troughDampingSmallWavelength);
-    CHECK_PROP_CHANGE(troughDampingBigWavelength);
-    CHECK_PROP_CHANGE(troughDampingSoftWidth);
+    CHECK_PROP_CHANGE(troughSmoothingLength);
 
     if (reProp) {
       propagateAtFrame();

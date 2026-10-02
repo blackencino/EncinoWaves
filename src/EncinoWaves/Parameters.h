@@ -96,9 +96,7 @@ struct Parameters {
   T amplitudeGain;  // vertical displacement
 
   T troughDamping;
-  T troughDampingSmallWavelength;
-  T troughDampingBigWavelength;
-  T troughDampingSoftWidth;
+  T troughSmoothingLength; // spatial Gaussian sigma, world metres
 
   // Dispersion Stuff - Deep, FiniteDepth, Capillary
   struct Dispersion {
@@ -162,9 +160,7 @@ struct Parameters {
     , pinch(0.75)
     , amplitudeGain(1.0)
     , troughDamping(0.5)
-    , troughDampingSmallWavelength(1.0)
-    , troughDampingBigWavelength(4.0)
-    , troughDampingSoftWidth(2.0) {}
+    , troughSmoothingLength(0.1) {}
 
   int resolution() const { return 1 << resolutionPowerOfTwo; }
 };

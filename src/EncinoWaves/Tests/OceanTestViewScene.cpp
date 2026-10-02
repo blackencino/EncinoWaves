@@ -179,19 +179,9 @@ ViewScene::ViewScene(const ewav::Parametersf& i_params,
                                    0.0f, 1.0f, 0.05f, 0.1f));
   m_paramEdits.push_back(pedit);
 
-  pedit.reset(new FloatParamEditor("trough damping small wavelength",
-                                   &m_params.troughDampingSmallWavelength, 0.0f,
-                                   1000.0f, 0.25f, 2.0f));
-  m_paramEdits.push_back(pedit);
-
-  pedit.reset(new FloatParamEditor("trough damping big wavelength",
-                                   &m_params.troughDampingBigWavelength, 0.0f,
-                                   1000.0f, 0.25f, 2.0f));
-  m_paramEdits.push_back(pedit);
-
-  pedit.reset(new FloatParamEditor("trough damping soft width",
-                                   &m_params.troughDampingSoftWidth, 0.1f,
-                                   1000.0f, 0.25f, 2.0f));
+  pedit.reset(new FloatParamEditor("trough smoothing sigma (metres)",
+                                   &m_params.troughSmoothingLength, 0.005f,
+                                   1.0f, 0.01f, 0.05f));
   m_paramEdits.push_back(pedit);
 
   pedit.reset(new FloatParamEditor("wind rotation",

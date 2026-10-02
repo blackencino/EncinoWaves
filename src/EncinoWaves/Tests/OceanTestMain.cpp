@@ -171,20 +171,10 @@ int main(int argc, char *argv[]) {
      ->default_value( params.troughDamping ),
      "Trough damping." )
 
-    ( "troughDampingSmallWavelength",
-      po::value<float>( &params.troughDampingSmallWavelength )
-      ->default_value( params.troughDampingSmallWavelength ),
-      "Trough damping small wavelength." )
-
-    ( "troughDampingBigWavelength",
-      po::value<float>( &params.troughDampingBigWavelength )
-      ->default_value( params.troughDampingBigWavelength ),
-      "Trough damping big wavelength." )
-
-    ( "troughDampingSoftWidth",
-      po::value<float>( &params.troughDampingSoftWidth )
-      ->default_value( params.troughDampingSoftWidth ),
-      "Trough damping soft width." )
+    ( "troughSmoothingLength",
+      po::value<float>( &params.troughSmoothingLength )
+      ->default_value( params.troughSmoothingLength ),
+      "Spatial trough smoothing Gaussian sigma in metres." )
 
     ( "random",
       po::value<int>( &random )

@@ -3,8 +3,8 @@
 
 make_initial_state is the float64 CPU reference setup. The editing module
 separates the seed from GPU spectral evaluation for continuous controls. All
-per-frame work runs on the selected GPU: six batched inverse FFTs, plus six
-for the optional spatial trough filter.
+per-frame work runs on the selected GPU: six batched inverse FFTs and an optional
+spatial height smoothing pass for troughs.
 No autograd, hidden evaluation history, amplitude normalization, or extra layers.
 """
 from dataclasses import dataclass, replace
@@ -36,21 +36,36 @@ class Wave_parameters:
     gamma: float = 3.3
     convention: str = "paper"
     trough_damping: float = .5
-    trough_small_wavelength: float = 1.0
-    trough_big_wavelength: float = 4.0
-    trough_soft_width: float = 2.0
+    trough_smoothing_length: float = .1  # Gaussian sigma, world metres
+    trough_filter_revision: int = 3     # serialized appearance method, not a spectrum option
 
     @classmethod
     def from_dict(cls, values):
         # Saved oceans from before this port had no spatial trough filter.
-        return cls(**{"trough_damping": 0.0, **values})
+        values = {"trough_damping": 0.0, **values}
+        revision = values.pop("trough_filter_revision", 1)
+        if revision not in (1, 2, 3):
+            raise ValueError("Unsupported trough filter revision")
+        names = ("trough_small_wavelength", "trough_big_wavelength", "trough_soft_width")
+        old_band = tuple(values.pop(name, None) for name in names)
+        if "trough_smoothing_length" not in values and any(value is not None for value in old_band):
+            # Migrate the known metre-scale legacy default to the intended
+            # sub-half-metre ripple smoothing. Other explicit bands retain an
+            # approximate scale: their upper wavelength is about five sigma.
+            if old_band == (1.0, 4.0, 2.0):
+                values["trough_smoothing_length"] = .1
+            else:
+                big = old_band[1] if old_band[1] is not None else (.4 if revision == 2 else 4.0)
+                soft = old_band[2] if old_band[2] is not None else (.1 if revision == 2 else 2.0)
+                values["trough_smoothing_length"] = (big+soft)/5
+        return cls(**values, trough_filter_revision=3)
 
     def __post_init__(self):
         n = self.resolution
         if not isinstance(n, int) or n < 16 or n > 4096 or n & (n - 1):
             raise ValueError("resolution must be a power of two from 16 to 4096")
         for name in ("domain", "wind_speed", "fetch_km", "depth", "gravity", "density", "gamma",
-                     "trough_small_wavelength", "trough_big_wavelength", "trough_soft_width"):
+                     "trough_smoothing_length"):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
@@ -61,8 +76,8 @@ class Wave_parameters:
             raise ValueError("swell must be in [-1, 2]")
         if not 0 <= self.trough_damping <= 1:
             raise ValueError("trough_damping must be in [0, 1]")
-        if self.trough_small_wavelength > self.trough_big_wavelength:
-            raise ValueError("trough wavelength band must be ordered")
+        if self.trough_filter_revision != 3:
+            raise ValueError("trough_filter_revision must be 3; import older settings with from_dict")
         if self.surface_tension < 0 or self.amplitude_gain < 0:
             raise ValueError("surface_tension and amplitude_gain cannot be negative")
         if self.spreading not in ("cosine_squared", "mitsuyasu", "hasselmann", "donelan_banner"):
@@ -356,7 +371,7 @@ def evaluate(state, time):
     # default inverse scaling would make the sea shrink with resolution.
     fields = torch.fft.irfft2(state.multipliers*h[None], s=(p.resolution, p.resolution), norm="forward")
     crest = crest_from_derivatives(*fields[3:].unbind(), p.pinch)
-    height, dx, dy = damp_troughs(p, h, state.multipliers, fields).unbind()
+    height, dx, dy = damp_troughs(p, fields).unbind()
     displacement = torch.stack((-p.pinch*dx, -p.pinch*dy, p.amplitude_gain*height, crest), dim=-1)
     # ComputeNormalsWithPinching from Normals.h: central differences of
     # actual displaced points, with periodic neighbors and unwrapped spacing.

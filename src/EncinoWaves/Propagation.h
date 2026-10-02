@@ -42,6 +42,7 @@
 #include "Parameters.h"
 #include "InitialState.h"
 #include "Stats.h"
+#include <algorithm>
 
 namespace EncinoWaves {
 
@@ -69,11 +70,7 @@ template <typename T> struct Propagation {
   ComplexSpectralField2D<T> TempSpec;
   RealSpatialField2D<T> TempSpat;
 
-  ComplexSpectralField2D<T> HFiltSpec;
   RealSpatialField2D<T> FiltHeight;
-  RealSpatialField2D<T> FiltDx;
-  RealSpatialField2D<T> FiltDy;
-  RealSpatialField2D<T> FiltMinE;
 
   SpectralToPaddedSpatial2D<T> Converter;
 
@@ -83,11 +80,7 @@ template <typename T> struct Propagation {
       : HSpec(i_params.resolutionPowerOfTwo),
         TempSpec(i_params.resolutionPowerOfTwo),
         TempSpat(i_params.resolutionPowerOfTwo, 1),
-        HFiltSpec(i_params.resolutionPowerOfTwo),
         FiltHeight(i_params.resolutionPowerOfTwo, 1),
-        FiltDx(i_params.resolutionPowerOfTwo, 1),
-        FiltDy(i_params.resolutionPowerOfTwo, 1),
-        FiltMinE(i_params.resolutionPowerOfTwo, 1),
         Converter(HSpec, TempSpat, i_nthreads), Domain(i_params.domain) {}
 
   void propagate(const Parameters<T> &i_params, const InitialState<T> &i_istate,
@@ -272,70 +265,98 @@ template <typename T> struct ComputeMinE {
 };
 
 //-*****************************************************************************
-template <typename T> struct HFILTSPEC {
-  typedef T real_type;
-  typedef std::complex<T> complex_type;
-  typedef Imath::Vec2<real_type> vec_type;
+// Periodic, separable spatial height smoothing. No additional transforms and
+// no changes to horizontal displacement or the original crest source.
+template <typename T> struct gaussian_height_pass {
+  T const* source;
+  T* destination;
+  std::vector<T> const* weights;
+  int width;
+  int radius;
+  bool vertical;
 
-  const SmoothInvertibleBandPassFilter<T> *Filter;
-
-  const complex_type *HSpecProp;
-  complex_type *HFiltSpecProp;
-
-  void operator()(std::size_t i_index) {
-    HFiltSpecProp[i_index] = HSpecProp[i_index];
-  }
-
-  void operator()(const vec_type &i_k, real_type i_kMag, real_type i_dK,
-                  std::size_t i_index) {
-    HFiltSpecProp[i_index] = (*Filter)(i_kMag)*HSpecProp[i_index];
-  }
-};
-
-//-*****************************************************************************
-template <typename T> struct ConvertMinEToInterpolant {
-  T GainMinE;
-  T BiasMinE;
-  T MinClipE;
-  T MaxClipE;
-  T MinInterpolant;
-  T *MinE_And_Interpolant;
-
-  void operator()(const tbb::blocked_range<std::size_t> &i_range) const {
-    for (std::size_t i = i_range.begin(); i != i_range.end(); ++i) {
-      T t = MinE_And_Interpolant[i];
-      t = (t * GainMinE) + BiasMinE;
-      t = smoothstep(MinClipE, MaxClipE, t);
-      t = mix(MinInterpolant, T(1), t);
-      MinE_And_Interpolant[i] = t;
+  void operator()(tbb::blocked_range<std::size_t> const& range) const {
+    int const stride = width + 1;
+    for (std::size_t index = range.begin(); index != range.end(); ++index) {
+      int const x = int(index % stride) % width;
+      int const y = int(index / stride) % width;
+      T sum = T(0);
+      for (int offset = -radius; offset <= radius; ++offset) {
+        int const sx = vertical ? x : ((x + offset) % width + width) % width;
+        int const sy = vertical ? ((y + offset) % width + width) % width : y;
+        sum += (*weights)[offset + radius] * source[sy * stride + sx];
+      }
+      destination[index] = sum;
     }
   }
 };
 
-//-*****************************************************************************
-template <typename T> struct InterpolateIntoB {
-  const T *A;
-  T *B;
-  const T *Interpolant;
-
-  void operator()(const tbb::blocked_range<std::size_t> &i_range) const {
-    for (std::size_t i = i_range.begin(); i != i_range.end(); ++i) {
-      B[i] = mix(A[i], B[i], Interpolant[i]);
-    }
+template <typename T>
+void damp_trough_height(T* height, T* temporary, T* smoothed, int const n,
+                       T const domain, T const sigma_metres, T const amount) {
+  T const spacing = domain / T(n);
+  // The ~5-sigma ripple scale must be represented even on the diagonal.
+  if (amount <= T(0) || sigma_metres <= T(0) ||
+      T(5) * sigma_metres <= std::sqrt(T(2)) * spacing) {
+    return;
   }
-};
-
-//-*****************************************************************************
-template <typename T> struct MultB {
-  const T *A;
-  T *B;
-
-  void operator()(const tbb::blocked_range<std::size_t> &i_range) const {
-    for (std::size_t i = i_range.begin(); i != i_range.end(); ++i) {
-      B[i] *= A[i];
-    }
+  // Three-sigma support, at most 33 taps per axis. Extremely fine grids reduce
+  // the effective sigma; they never silently widen the physical smoothing.
+  int const max_radius = 16;
+  T const sigma = std::min(sigma_metres / spacing, T(max_radius) / T(3));
+  int const radius = std::min(max_radius, std::max(1, int(std::ceil(T(3) * sigma))));
+  std::vector<T> weights(2 * radius + 1);
+  T total = T(0);
+  for (int offset = -radius; offset <= radius; ++offset) {
+    T const value = std::exp(T(-0.5) * sqr(T(offset) / sigma));
+    weights[offset + radius] = value;
+    total += value;
   }
-};
+  for (T &weight : weights) { weight /= total; }
+  std::size_t const size = std::size_t(n + 1) * std::size_t(n + 1);
+  gaussian_height_pass<T> pass{height, temporary, &weights, n, radius, false};
+  tbb::parallel_for(tbb::blocked_range<std::size_t>(0, size), pass);
+  pass.source = temporary;
+  pass.destination = smoothed;
+  pass.vertical = true;
+  tbb::parallel_for(tbb::blocked_range<std::size_t>(0, size), pass);
+
+  // Count each periodic texel once: duplicated last rows/columns must not bias
+  // the height mask or make it depend on where the patch boundary was placed.
+  int const stride = n + 1;
+  double const count = double(n) * double(n);
+  double const mean = tbb::parallel_reduce(
+      tbb::blocked_range<int>(0, n), 0.0,
+      [&](tbb::blocked_range<int> const& rows, double sum) {
+        for (int y = rows.begin(); y != rows.end(); ++y) {
+          for (int x = 0; x < n; ++x) { sum += double(smoothed[y * stride + x]); }
+        }
+        return sum;
+      }, std::plus<double>()) / count;
+  double const variance = tbb::parallel_reduce(
+      tbb::blocked_range<int>(0, n), 0.0,
+      [&](tbb::blocked_range<int> const& rows, double sum) {
+        for (int y = rows.begin(); y != rows.end(); ++y) {
+          for (int x = 0; x < n; ++x) {
+            double const delta = double(smoothed[y * stride + x]) - mean;
+            sum += delta * delta;
+          }
+        }
+        return sum;
+      }, std::plus<double>()) / count;
+  T const deviation = T(std::sqrt(variance));
+  if (deviation <= T(1e-8)) { return; }
+  T const scale = std::sqrt(T(2)) * deviation;
+  T const strength = Imath::clamp(amount, T(0), T(1));
+  tbb::parallel_for(tbb::blocked_range<std::size_t>(0, size),
+      [&](tbb::blocked_range<std::size_t> const& range) {
+        for (std::size_t i = range.begin(); i != range.end(); ++i) {
+          T const depth = (T(mean) - smoothed[i]) / scale;
+          T const wet = strength * smoothstep(T(0), T(1), depth);
+          height[i] += wet * (smoothed[i] - height[i]);
+        }
+      });
+}
 
 //-*****************************************************************************
 template <typename T>
@@ -431,171 +452,11 @@ void Propagation<T>::propagate(const Parameters<T> &i_params,
   // Compute Dy
   { Converter.execute(TempSpec, o_pstate.Dy); }
 
-  // build filter.
-  if (i_params.troughDamping == 0) {
-    // Compute H.
-    { Converter.execute(HSpec, o_pstate.Height); }
-    return;
-  }
-
-  SmoothInvertibleBandPassFilter<T> filter(
-      0.0, i_params.troughDampingSmallWavelength,
-      i_params.troughDampingBigWavelength,
-      i_params.troughDampingBigWavelength + i_params.troughDampingSoftWidth, 0,
-      true);
-
-  // Create filtered H spectrally
-  {
-    HFILTSPEC<T> F;
-    F.Filter = &filter;
-    F.HSpecProp = HSpec.cdata();
-    F.HFiltSpecProp = HFiltSpec.data();
-    SpectralIterationFunctor<T, HFILTSPEC<T>, HFILTSPEC<T>> SIF(&F, Domain, N);
-  }
-
-  // Compute H.
-  { Converter.execute(HSpec, o_pstate.Height); }
-
-  // Make DxxFiltSpec from HFiltspec
-  {
-    DXXSPEC<T> F;
-    F.HSpecProp = HFiltSpec.cdata();
-    F.DxxSpecProp = TempSpec.data();
-    SpectralIterationFunctor<T, DXXSPEC<T>, DXXSPEC<T>> SIF(&F, Domain, N);
-  }
-
-  // Compute FiltDxx, temporarily put into FiltDx.
-  { Converter.execute(TempSpec, FiltDx); }
-
-  // Make DyyFiltSpec from HFiltspec
-  {
-    DYYSPEC<T> F;
-    F.HSpecProp = HFiltSpec.cdata();
-    F.DyySpecProp = TempSpec.data();
-    SpectralIterationFunctor<T, DYYSPEC<T>, DYYSPEC<T>> SIF(&F, Domain, N);
-  }
-
-  // Compute FiltDyy, temporarily put into FiltDy.
-  { Converter.execute(TempSpec, FiltDy); }
-
-  // Make DxyFiltSpec from HFiltspec
-  {
-    DXYSPEC<T> F;
-    F.HSpecProp = HFiltSpec.cdata();
-    F.DxySpecProp = TempSpec.data();
-    SpectralIterationFunctor<T, DXYSPEC<T>, DXYSPEC<T>> SIF(&F, Domain, N);
-  }
-
-  // Compute FiltDxy, temporarily put into FiltMinE.
-  { Converter.execute(TempSpec, FiltMinE); }
-
-  // Compute FiltMinE from FiltDxx, FiltDyy, FiltDxy.
-  {
-    ComputeMinE<T> F;
-    F.Dxx = FiltDx.cdata();
-    F.Dyy = FiltDy.cdata();
-    F.Dxy_and_MinE = FiltMinE.data();
-    F.Pinch = T(1.25);
-    // CJH HACK
-    tbb::parallel_for(
-        tbb::blocked_range<std::size_t>(0, dataSize /*, grainSize*/), F);
-  }
-
-  // Make DxFiltSpec from HFiltspec
-  {
-    DXSPEC<T> F;
-    F.HSpecProp = HFiltSpec.cdata();
-    F.DxSpecProp = TempSpec.data();
-    SpectralIterationFunctor<T, DXSPEC<T>, DXSPEC<T>> SIF(&F, Domain, N);
-  }
-
-  // Compute FiltDx
-  { Converter.execute(TempSpec, FiltDx); }
-
-  // Make DyFiltSpec from HFiltspec
-  {
-    DYSPEC<T> F;
-    F.HSpecProp = HFiltSpec.cdata();
-    F.DySpecProp = TempSpec.data();
-    SpectralIterationFunctor<T, DYSPEC<T>, DYSPEC<T>> SIF(&F, Domain, N);
-  }
-
-  // Compute FiltDy
-  { Converter.execute(TempSpec, FiltDy); }
-
-  // Compute FiltH.
-  {
-    // CJH HACK
-    // Converter.execute( HSpec, FiltHeight );
-    Converter.execute(HFiltSpec, FiltHeight);
-  }
-
-  // Get Stats about FiltH and FiltMinE
-  Stats<T> stats(FiltHeight, FiltMinE);
-  // A flat guide field has no troughs to distinguish; avoid 0/0 statistics.
-  if (stats.StdDevMinE <= T(1e-8)) {
-    return;
-  }
-
-  // Compute interpolant from stats.
-  {
-    ConvertMinEToInterpolant<T> F;
-    F.GainMinE = T(1) / (T(2) * stats.StdDevMinE);
-    F.BiasMinE = -stats.MeanMinE / (T(2) * stats.StdDevMinE);
-    F.MinClipE = 0.0;
-    F.MaxClipE = 1.1;
-    F.MinInterpolant = T(1) - Imath::clamp(i_params.troughDamping, T(0), T(1));
-    F.MinE_And_Interpolant = FiltMinE.data();
-    // CJH HACK
-    tbb::parallel_for(
-        tbb::blocked_range<std::size_t>(0, dataSize /*, grainSize*/), F);
-  }
-
-  // Interpolate into output state.
-  {
-    InterpolateIntoB<T> F;
-    F.A = FiltHeight.cdata();
-    F.B = o_pstate.Height.data();
-    F.Interpolant = FiltMinE.cdata();
-    // CJH HACK
-    tbb::parallel_for(
-        tbb::blocked_range<std::size_t>(0, dataSize /*, grainSize*/), F);
-  }
-
-  // Interpolate into output state.
-  {
-    InterpolateIntoB<T> F;
-    F.A = FiltDx.cdata();
-    F.B = o_pstate.Dx.data();
-    F.Interpolant = FiltMinE.cdata();
-    // CJH HACK
-    tbb::parallel_for(
-        tbb::blocked_range<std::size_t>(0, dataSize /*, grainSize*/), F);
-  }
-
-  // Interpolate into output state.
-  {
-    InterpolateIntoB<T> F;
-    F.A = FiltDy.cdata();
-    F.B = o_pstate.Dy.data();
-    F.Interpolant = FiltMinE.cdata();
-    // CJH HACK
-    tbb::parallel_for(
-        tbb::blocked_range<std::size_t>(0, dataSize /*, grainSize*/), F);
-  }
-
-#if 0
-    // Mult output MinE
-    {
-        MultB<T> F;
-        F.A = FiltMinE.cdata();
-        F.B = o_pstate.MinE.data();
-        // CJH HACK
-        tbb::parallel_for(
-            tbb::blocked_range<std::size_t>( 0, dataSize/*, grainSize*/ ),
-            F );
-    }
-#endif
+  // Synthesize height once, then quiet only small ripples below the mean.
+  // Dx, Dy and MinE above remain exactly as originally synthesized.
+  Converter.execute(HSpec, o_pstate.Height);
+  damp_trough_height(o_pstate.Height.data(), TempSpat.data(), FiltHeight.data(),
+                   N, Domain, i_params.troughSmoothingLength, i_params.troughDamping);
 }
 
 } // namespace EncinoWaves
