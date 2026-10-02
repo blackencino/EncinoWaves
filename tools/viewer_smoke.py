@@ -106,11 +106,16 @@ try:
     assert float(viewer.foam_state.density.sum().cpu()) == 0
     assert viewer.renderer.frame is wave_frame
     original_header = imgui.collapsing_header
+    original_tree = imgui.tree_node
     def expanded_header(label):
         imgui.set_next_item_open(True)
         return original_header(label)
-    imgui.collapsing_header = expanded_header
-    canvas.draw()
+    def expanded_tree(label):
+        imgui.set_next_item_open(True)
+        return original_tree(label)
+    with patch.object(imgui, 'collapsing_header', expanded_header), \
+         patch.object(imgui, 'tree_node', expanded_tree):
+        canvas.draw()
     print('Viewer UI, wave edits, trough damping, rotation, RGB foam replay/reset, Maya events, comparison, and all panels passed',flush=True)
 finally:
     viewer.executor.shutdown(wait=True,cancel_futures=True)

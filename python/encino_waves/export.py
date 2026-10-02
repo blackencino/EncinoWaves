@@ -15,6 +15,7 @@ from .model import Wave_parameters, Phase_step, make_initial_state, evaluate
 from .editing import make_edited_state
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics, read_rgba
 from .camera import frame_domain
+from .presets import presentation_views
 from .foam import Foam_parameters, prepare_foam, advance_foam_to
 
 
@@ -40,10 +41,12 @@ class Shot:
 
 def academy_shots(resolution=2048):
     p=Wave_parameters(resolution=resolution)
+    horizon=presentation_views(p.domain)[1]
     # 300 seconds exactly; each cut is an actual fixed physical state.
     # Identical geometry, shading, seed and scale within each comparison.
     return (
-        Shot(20,"Encino Waves","Christopher J. Horvath | Empirical directional wave spectra",p),
+        Shot(20,"Encino Waves","Christopher J. Horvath | Ocean waves shaped by real conditions",p,
+             camera=horizon.camera,look=horizon.look),
         Shot(25,"The starting point","Earlier model / Encino Waves",p,True),
         Shot(15,"Wind speed","5 m/s",replace(p,wind_speed=5,fetch_km=50)),
         Shot(15,"Wind speed","17 m/s",p),
@@ -51,7 +54,7 @@ def academy_shots(resolution=2048):
         Shot(15,"Fetch","20 km | A short distance for the wind to build waves",replace(p,fetch_km=20)),
         Shot(15,"Fetch","300 km",p),
         Shot(15,"Fetch","1,250 km | More distance for waves to develop",replace(p,fetch_km=1250)),
-        Shot(20,"Directional spreading","How wave directions vary with wavelength",replace(p,spreading="hasselmann"),True),
+        Shot(20,"Wave directions","Different sizes of waves travel in different directions",replace(p,spreading="hasselmann"),True),
         Shot(20,"Local wind","Swell 0 | An irregular sea",replace(p,swell=0)),
         Shot(20,"Distant weather","Swell 1 | Long, parallel wave trains",replace(p,swell=1)),
         Shot(15,"Ocean depth","150 metres",replace(p,depth=150)),
@@ -59,7 +62,8 @@ def academy_shots(resolution=2048):
         Shot(20,"A range of conditions","Light wind | 3 m/s, 8 km fetch",replace(p,domain=160,wind_speed=3,fetch_km=8,depth=30)),
         Shot(20,"A range of conditions","Storm | 35 m/s, 1,250 km fetch",replace(p,domain=1800,wind_speed=35,fetch_km=1250,depth=150),camera=frame_domain(512)),
         Shot(15,"Physical controls","Wind speed. Fetch. Directional spreading. Swell. Depth.",p),
-        Shot(20,"Encino Waves","Empirical directional wave spectra for computer graphics | 2015",replace(p,swell=.6)),
+        Shot(20,"Encino Waves","Empirical directional wave spectra for computer graphics | 2015",replace(p,swell=.6),
+             camera=horizon.camera,look=horizon.look),
     )
 
 

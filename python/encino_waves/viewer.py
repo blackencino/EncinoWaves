@@ -16,7 +16,7 @@ from .model import Wave_parameters, Phase_step, evaluate
 from .editing import (make_wave_basis, state_from_basis, same_wave_basis,
                       follow_parameters, edit_state, restore_phase)
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
-from .presets import SCENES, scene_with_resolution
+from .presets import SCENES, scene_with_resolution, presentation_views
 from .camera import frame_domain
 from .foam import Foam_parameters, update_foam, save_foam, load_foam
 
@@ -466,30 +466,56 @@ class Viewer:
             if changed:
                 self.foam_parameters=replace(self.foam_parameters,enabled=value)
                 self.reset_foam()
-            if imgui.is_item_hovered(): imgui.set_tooltip("Build surface foam and underwater bubbles over time. Off restores the original crest shading.")
+            if imgui.is_item_hovered(): imgui.set_tooltip("Build surface foam and underwater bubbles over time. Off uses immediate crests without history.")
             if imgui.button("Reset foam"): self.reset_foam()
-            for label,name,lo,hi,fmt in (
-                ("Emission","emission",0,5,"%.2f /s"),
-                ("Surface lifetime","surface_half_life",.3,20,"%.1f s"),
-                ("Breakup","breakup",0,1,"%.2f"),
-                ("Spreading","diffusion",0,1,"%.2f m2/s"),
-                ("Shallow to deep","exchange",0,1,"%.2f /s")):
-                changed,value=imgui.slider_float(label,getattr(self.foam_parameters,name),lo,hi,fmt)
-                if changed: self.foam_parameters=replace(self.foam_parameters,**{name:value})
-            changed,value=imgui.slider_float("Underwater bubbles",self.look.aeration,0,2,"%.2f")
-            if changed: self.look=replace(self.look,aeration=value)
-            sizes=[256,512,1024,2048]
-            # Small test / API maps are valid even though the UI starts at 256.
-            if self.foam_parameters.resolution not in sizes: sizes=sorted(sizes+[self.foam_parameters.resolution])
-            changed,index=imgui.combo("Foam map",sizes.index(self.foam_parameters.resolution),[str(n) for n in sizes])
-            if changed: self.foam_parameters=replace(self.foam_parameters,resolution=sizes[index])
-            imgui.text_wrapped("Foam builds during playback. Major sea changes and time scrubbing clear its history.")
+            imgui.text_wrapped("Foam follows breaking waves and remembers earlier breaks. It builds during playback.")
+            changed,value=imgui.slider_float("Surface lifetime",self.foam_parameters.surface_half_life,.3,20,"%.1f s")
+            if changed: self.foam_parameters=replace(self.foam_parameters,surface_half_life=value)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Time for surface foam to fade to half its density after a break.")
+            if imgui.tree_node("Advanced foam"):
+                models=["legacy","compression"]
+                changed,index=imgui.combo("Foam source",models.index(self.foam_parameters.emission_model),
+                                         ["Original crests","Breaking waves"])
+                if changed:
+                    self.foam_parameters=replace(self.foam_parameters,emission_model=models[index])
+                    self.reset_foam()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Breaking waves uses actual surface compression. Calm seas emit less foam. Source changes clear history.")
+                if self.foam_parameters.emission_model == "compression":
+                    changed,value=imgui.slider_float("Breaking threshold",self.foam_parameters.compression_threshold,.4,.9,"%.2f")
+                    if changed: self.foam_parameters=replace(self.foam_parameters,compression_threshold=value)
+                for label,name,lo,hi,fmt in (
+                    ("Emission","emission",0,5,"%.2f /s"),
+                    ("Breakup","breakup",0,1,"%.2f"),
+                    ("Spreading","diffusion",0,1,"%.2f m2/s"),
+                    ("Shallow to deep","exchange",0,1,"%.2f /s")):
+                    changed,value=imgui.slider_float(label,getattr(self.foam_parameters,name),lo,hi,fmt)
+                    if changed: self.foam_parameters=replace(self.foam_parameters,**{name:value})
+                changed,value=imgui.slider_float("Underwater bubbles",self.look.aeration,0,2,"%.2f")
+                if changed: self.look=replace(self.look,aeration=value)
+                sizes=[256,512,1024,2048]
+                # Small test / API maps are valid even though the UI starts at 256.
+                if self.foam_parameters.resolution not in sizes: sizes=sorted(sizes+[self.foam_parameters.resolution])
+                changed,index=imgui.combo("Foam map",sizes.index(self.foam_parameters.resolution),[str(n) for n in sizes])
+                if changed: self.foam_parameters=replace(self.foam_parameters,resolution=sizes[index])
+                imgui.text_wrapped("Major sea changes and time scrubbing clear foam history.")
+                imgui.tree_pop()
         expanded=imgui.collapsing_header("Camera & light")
         if expanded:
+            views=presentation_views(self.parameters.domain)
+            changed,index=imgui.combo("Compose view",0,["Choose a view..."]+[view.name for view in views])
+            if changed and index:
+                view=views[index-1]
+                self.camera=view.camera
+                self.look=replace(self.look,exposure=view.look.exposure,sky_rotation=view.look.sky_rotation,
+                                  sky_gain=view.look.sky_gain,haze=view.look.haze)
+            changed,index=imgui.combo("Water shading",["physical","2015"].index(self.look.material),["Presentation","Original 2015"])
+            if changed: self.look=replace(self.look,material=["physical","2015"][index])
             for label,name,lo,hi,fmt in (("Height","height",.5,2000,"%.1f m"),("Pitch","pitch",-89,89,"%.1f deg"),("Heading","yaw",-180,180,"%.1f deg")):
                 changed,value=imgui.slider_float(label,getattr(self.camera,name),lo,hi,fmt)
                 if changed: self.camera=replace(self.camera,**{name:value})
-            for label,name,lo,hi,fmt in (("Exposure","exposure",-4,4,"%.1f stops"),("Sky rotation","sky_rotation",-180,180,"%.0f deg"),("Foam","foam",0,1,"%.2f")):
+            for label,name,lo,hi,fmt in (("Exposure","exposure",-4,4,"%.1f stops"),("Sky rotation","sky_rotation",-180,180,"%.0f deg"),("Sky gain","sky_gain",.1,4,"%.2f"),("Haze","haze",0,3,"%.2f"),("Foam","foam",0,1,"%.2f")):
                 changed,value=imgui.slider_float(label,getattr(self.look,name),lo,hi,fmt)
                 if changed: self.look=replace(self.look,**{name:value})
             if imgui.button("Open HDR sky..."): self._open_file("sky")

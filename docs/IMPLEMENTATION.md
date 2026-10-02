@@ -41,8 +41,9 @@ The C++ bridge validates device identity, size, texture format and write usage.
 It submits packing kernels on the current Torch MPS stream under its dispatch
 queue lock, after pending Torch compute. The wave kernel converts float4 to
 half4. The foam kernel packs the three density planes and the existing fine
-bubble grain, preserving the original clamp and half rounding. Wave/foam math,
-shaders, HDR lighting and camera are unchanged.
+bubble grain, preserving the original clamp and half rounding. The handoff itself
+does not alter wave/foam math, shaders, HDR lighting or camera; the separate
+presentation changes are described below.
 
 There is still **CPU synchronization**, without copying field data. wgpu-native
 29 exposes textures but its native Metal queue getter returns NULL. We fence
@@ -363,9 +364,131 @@ Spectrum partitioning into displacement cascades is also described in
 Its hard bands and domain sizes differ from the proposed overlapping,
 poorly commensurate two-domain experiment above.
 
+## Presentation rendering
+
+The `academy/visual-polish` work changes rendering and secondary foam only.
+`model.py`, `editing.py`, `trough.py`, and the C++ wave implementation are unchanged
+from the GPU-transfer branch. Fixed-state captures hash the displacement and
+normal arrays; the original and new material receive identical wave fields.
+The independent trough audit found the existing bounded spatial blend consistent
+with the original implementation, including its pre-damping crest source.
+
+The presentation path resolves a four-sample RGBA16F target in linear light,
+then applies exposure, Khronos PBR Neutral and exact sRGB encoding in a separate
+display pass. Each comparison side has its own intermediate, so resolving one
+viewport cannot erase the other. A common radiance storage scale protects the
+half-float intermediate even for HDR sources above 65504; display exposure
+reverses this scale before tone mapping. The old shader remains selectable.
+Centroid interpolation keeps shading coordinates inside covered MSAA triangles;
+ordinary pixel-center interpolation could extrapolate behind the camera on tiny
+horizon triangles and flash the opposite sky's fog color. Moving/flat/sky-only
+controls isolated this artifact without changing the wave fields.
+
+`lighting.py` integrates the upper sky with exact spherical texel areas and SH
+moments. Nine coefficients represent cosine-convolved irradiance divided by pi.
+A compact bright source is separated only when the HDR supports one; the autumn
+03a sky contains a cloud opening, not a resolved solar disc. Treating its brightest
+pixel as directional irradiance was an important source of the old overlighting.
+The water body uses ambient SH with a detected direct source removed; surface
+foam uses the full sky. The direct beam uses refracted rays, entry flux projection,
+Beer attenuation, normalized Henyey–Greenstein scattering and the radiance
+conversion back to air. Reflection and transmission remain nonnegative.
+
+The ambient body term (`0.33 * sky_irradiance * scattering_albedo`) is a calibrated
+multiple-scattering approximation. The viewer does not solve transport through
+the two faces of a thin crest, reflect other scene objects, or simulate underwater
+caustics. Clear-water absorption/scattering and bubble extinction are explicit
+material choices; the ocean spectrum is not recolored or reshaped to improve a
+shot. Foam can legitimately be darker than a strong specular glint.
+
+`environment.py` creates a separate 1024x512 GGX-prefiltered panorama on the GPU
+at sky load time. Its mip levels encode perceptual roughness, using importance
+sampling and a spherical-area/PDF source footprint. The split-sum response is
+applied once. Shortening of filtered wave normals supplies a bounded unresolved
+slope estimate; it is an approximate mapping to GGX roughness, not an exact LEAN
+covariance reconstruction. The original full-resolution sky remains the visible
+background. Trilinear/anisotropic filtering limits distant shimmer.
+
+`ocean_dome` reprojects the existing upper sky over the hemisphere. The renderer
+uses a 10-degree horizon trim: the tallest photographed turbine extended above
+8 degrees. Longitude and zenith are preserved. A small angular haze transition
+and distance-based water fog meet the same azimuth-dependent horizon radiance.
+The raw licensed image stays unchanged and local.
+
+### Foam birth and material
+
+New states use the existing minimum principal horizontal stretch as the source.
+Emission starts below 0.75 and reaches full strength at 0.60, before area filtering
+to the foam map. The previous normalized source largely canceled the effect of
+wave strength. Absolute compression restores dependence on wind, fetch and depth
+without adding a separate wind multiplier or altering wave geometry. This is a
+breaking heuristic: pinch, spectral bandwidth, diffusion and history still
+affect coverage. It is not a measured or resolution-independent Beaufort mapping.
+Old scene dictionaries without an emission-model field load the original source;
+switching sources clears mixed history. Small threshold edits retain history.
+
+The RGB history still stores surface, shallow and deep aeration. Decay, periodic
+diffusion, depth exchange and the four-scale emission fractal are unchanged. No
+orbital advection is added: the material coordinates already travel with the
+displaced surface. Wind streaks remain absent.
+
+`foam_material.py` integrates nonlinear surface coverage with 4x4 samples per
+history texel, then linearly mip-filters coverage and coverage-weighted material
+moments. Close fragments use the same coverage function; a footprint transition
+joins the integrated path. This prevents thresholding a blurred density from
+erasing distant whitecaps. A bounded RGB ratio controls connected fresh sheets
+versus older perforation; it is a maturity proxy, not a physical age field.
+
+`foam_detail.py` generates one periodic 4 m material tile with 6, 16 and 42 cm
+structure and millimetre-scale relief. Its mipmaps carry mean slopes, slope energy
+and mean-one reflectance variation. One extra sample perturbs only the foam
+normal; unresolved slope energy increases foam roughness. No new displacement,
+per-frame CPU texture generation, asset download or distributed bitmap is used.
+
+The source, material integration, mip generation, HDR rendering and display pass
+all remain on the GPU during animation. Sequential M2 Max / Metal measurements
+include wave synthesis, trough damping, foam, native transfer and GPU completion.
+Times are median / p95 milliseconds; the new presentation path uses four samples.
+
+| Wave grid / output | Previous viewer | Presentation viewer |
+|---|---:|---:|
+| 1024² / 1920×1080 | 14.95 / 16.85 | 16.77 / 18.98 |
+| 1024² / 2880×1800 | 13.53 / 15.92 | 16.67 / 18.93 |
+| 2048² / 1920×1080 | 32.30 / 32.43 | 33.59 / 33.84 |
+
+Window presentation, UI, startup and image readback are excluded. Short runs
+vary with GPU scheduling and clock state; the second row's lower previous time
+is within that variability. Paused 1080p rendering takes about 4.3 ms for the new
+material versus 3.0 ms previously. `tools/benchmark_visualizer.py` records both
+medians and p95 with an ordered four-byte GPU completion fence, outside the
+production path. NVIDIA hardware is not available here; the new shaders use the
+same portable wgpu path, without additional Metal-specific rendering code.
+
+### References and checks
+
+The implementation draws on documented techniques, not an inferred reconstruction
+of Spider-Man 2 or Halo:
+
+- [NVIDIA / War Thunder, 2015](https://developer.download.nvidia.com/assets/gameworks/downloads/regular/events/cgdc15/CGDC2015_ocean_simulation_en.pdf): persistent turbulence/foam, compression birth, decay and diffusion.
+- [Tessendorf, Reinhardt and Gao, 2020](https://jtessen.people.clemson.edu/gilligan/html/whitecap_fraction.pdf): minimum-eigenvalue birth and whitecap calibration.
+- [Dupuy and Bruneton, 2012](https://liris.cnrs.fr/Documents/Liris-5812.pdf): filtering whitecap coverage.
+- [Bruneton, Neyret and Holzschuch, 2010](https://morpho.inrialpes.fr/Publications/2010/BNH10/article.pdf): transition from resolved geometry to reflection statistics.
+- [Karis, 2014](https://www.unrealengine.com/blog/physically-based-shading-on-mobile): prefiltered image-based lighting and analytical environment BRDF.
+- [Filament](https://google.github.io/filament/main/filament.html): GGX importance sampling and filtering.
+- [Crest foam shader](https://raw.githubusercontent.com/wave-harmonic/crest/master/crest/Assets/Crest/Crest/Shaders/OceanFoam.hlsl): separate surface foam relief and submerged bubbles.
+- [Khronos PBR Neutral](https://github.com/KhronosGroup/ToneMapping): display transform; adaptation noted in `NOTICE`.
+
+CPU and GPU checks cover sky integration, prefilter constants and seam/pole
+behavior, coverage conservation, detail moments, source trends, legacy snapshots,
+black/white/HDR lighting, invalid-facing normals, direct-source transport, rigid
+rotation, comparison viewport preservation, host/native texture equality and
+scene replay. `tools/visual_review.py`, `tools/foam_response.py` and
+`tools/presentation_review.py` provide repeatable stills, parameter-domain checks
+and a short movie. Their generated files are ignored by Git.
+
 ## Original viewer baseline
 
-The water shader in `shaders/ocean.wgsl` is ported from
+The retained water shader in `shaders/ocean_2015.wgsl` is ported from
 `src/EncinoWaves/Tests/OceanTestShaders.cpp`, specifically
 `g_fragmentShaderTextureSkyBase`. It preserves the original 1.3 refractive index,
 Fresnel transmission scaling, Pacific scattering and extinction constants,
@@ -373,14 +496,15 @@ Henyey-Greenstein phase, sun and opposite sky sample, specular exponent,
 normalized crest shading, layered fog and 2.2 display gamma. The sky gain of
 2 matches `OceanTestTextureSky.cpp`. A denominator guard handles horizontal fog
 rays; an algebraically equivalent fog evaluation avoids overflow from high
-cameras. Exposure is explicit and defaults to zero. There is no filmic tonemapper.
+cameras. This baseline uses explicit exposure and no filmic tonemapper.
 HDR pixels that exceed half-float range are stored with a uniform scale that is
 restored in the shader. Light extraction selects the upper hemisphere; the old
 loader searched all pixels. A real sky panorama's sun remains in that hemisphere.
 The supplied Dutch Skies 360 Autumn Pack 01, 03a is installed under the ignored
 `assets/local/` directory. Discovery selects its 4000×2000 `_Ref.hdr`, preserving
 linear HDR values and full panorama resolution, instead of the 360×180 blurred
-`_Env.hdr`. The original gain, display gamma, camera and water shader are retained.
+`_Env.hdr`. The original display gamma and water shader are retained in this
+comparison material; set sky gain 2 and exposure 0 to match the previous defaults.
 The native viewer and offline renderer share this selection; saved scenes store
 the resolved HDR path. The original files and sIBL descriptor remain together.
 Scene JSON includes the height and crest statistics from the original shader's
@@ -412,13 +536,14 @@ aeration densities in the ocean's undisplaced periodic coordinates. The mesh
 displacement carries this map along with the surface, and wind direction rotates
 the complete field. This version has no additional current/advection solver.
 
-Emission uses the original normalized negative minimum-eigenvalue crest map,
+The legacy emission option uses the original normalized negative minimum-eigenvalue crest map,
 with the same default 0.5–1.1 smooth threshold as the original shader. Calibration
 is held with the foam history. Source precision matches the half-float display
 map, avoiding amplified sub-texel residuals in nearly flat water. The model does
-not infer a measured whitecap
-fraction from wind speed; these remain artist controls. Four octaves of seeded,
-spatially periodic quintic noise evolve slowly in time and modulate emission.
+not infer a measured whitecap fraction from wind speed. The new default uses
+absolute compression, described under Presentation rendering. Both sources use
+four octaves of seeded, spatially periodic quintic noise that evolve slowly in
+time and modulate emission.
 Thresholding precedes downsampling, preserving the contribution of narrow crests
 when a 4096² wave field drives a smaller foam map.
 
@@ -438,16 +563,16 @@ density and alpha as stable, mip-filtered bubble detail. Subsurface density
 changes the existing shader's scattering, extinction and phase coefficients;
 surface density supplies a separate foam coverage layer. Dilute remnants become
 transparent rather than whitening the whole sea. Disabling persistent foam
-uses the original crest shading, with the original water constants.
+uses immediate crest shading in the selected water material.
 
 The default surface half-life
 is 1.5 s, diffusion 0.56 m²/s, exchange 0.29/s, and underwater strength 1.25;
 emission remains 1.2/s with full fractal breakup.
 
 The wind-streak experiment and its extra immediate crest overlay have been
-removed. The emission, aging, breakup and foam shader are restored to `d390aea`,
+removed. The retained legacy emission, aging and breakup derive from `d390aea`,
 with the artist-selected defaults above. At identical wave fields and controls,
-the restored RGB history matches that implementation exactly on Metal. The
+the legacy RGB history matches that implementation exactly on Metal. The
 four emission octaves and separate fine shader grain retain their original
 scales and weights. Version 1 and 2 checkpoints still load: only the RGB density
 is restored, and known retired appearance settings and windrow arrays are
@@ -475,7 +600,7 @@ resolution, because the foam grid is independent. Shots without history use a
 six-second preroll at 30 Hz (`--foam-preroll`); low-FPS exports subdivide long
 output intervals. A changed output time starts new preroll rather than presenting
 the old checkpoint as the correct history at that time. Existing old scene JSON
-defaults to the original shading until foam is explicitly enabled.
+keeps persistent foam disabled until it is explicitly enabled.
 
 The local Tweak tree contains a precursor in
 `~/dvlp/src/bin/water/moveTxt2/main.cpp`: wrapped history advection, diffusion,
@@ -490,8 +615,8 @@ describes minimum-eigenvalue emission and persistent, decaying whitecap textures
 ## Verification limits
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
-exercised locally. On October 1, 2026 the numerical suite passed 88 checks
-with twenty-two CUDA-only skips. The UI check exercises camera events, continuous
+exercised locally. The presentation branch passed 218 numerical and rendering
+checks, with 28 unavailable-device/reference skips. The UI check exercises camera events, continuous
 wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
 panels, including with the supplied Dutch Skies HDR. Direction edits preserve
 the exact spectral coefficients across all four spreading models. The UI test

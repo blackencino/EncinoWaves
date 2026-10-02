@@ -3,6 +3,8 @@
 This branch adds a functional Python GPU implementation and a native viewer.
 Ocean compute uses **PyTorch: Metal on Apple silicon, CUDA on NVIDIA**. Graphics
 use **wgpu: Metal, Vulkan, or D3D12**. The original C++ source remains in `src/`.
+The presentation renderer adds environment lighting, filtered reflections and
+persistent foam without changing the wave formulation or trough filter.
 
 ### Run
 
@@ -11,6 +13,10 @@ Python 3.11 or later is required. On this Mac the environment is already install
 ```sh
 ./run_viewer.command
 ```
+
+If this worktree shares another checkout's virtual environment, prefix the
+Python commands below with `PYTHONPATH=python` so they use this branch's source.
+The viewer launcher already does this.
 
 For a fresh macOS or Linux checkout:
 
@@ -62,35 +68,41 @@ edits preserve the wave realization and phase. This is a production appearance
 filter applied after spectral synthesis. Older saved scenes retain their previous
 undamped surface until it is enabled explicitly.
 
-The **Foam & aeration** panel adds a separate, persistent RGB map: surface foam,
-shallow bubbles, and deeper bubbles. Crests emit through slowly evolving fractal
-breakup; existing foam diffuses, fades, and exchanges from shallow to deep.
+The **Foam & aeration** panel controls a separate, persistent RGB map: surface foam,
+shallow bubbles, and deeper bubbles. Breaking crests emit through slowly evolving
+fractal breakup; existing foam diffuses, fades, and exchanges from shallow to deep.
 The shader uses it for lingering surface patches and underwater scattering.
 The wave spectrum and displacement are unchanged. Turn **Persistent foam** off
-to return to the original crest shading.
+to use immediate crest shading.
+
+New oceans emit from actual surface compression. Calm water produces little
+foam; stronger breaking produces more, and shallow-water damping reduces the
+source naturally. This is a breaking heuristic, not a calibrated Beaufort model.
+The advanced settings retain **Original crests** for comparison and older scenes.
 
 Foam builds during playback; pausing freezes its history. **Reset foam** clears
 it without restarting the waves. Large physical edits, a new patch/seed, and
 time scrubbing also clear history. Rotating the ocean rotates the existing foam.
 The map defaults to 512² independently of wave resolution, with options through
-2048². Emission, lifetime, breakup, spreading, exchange, and underwater strength
-are adjustable in the panel.
+2048². Surface lifetime is adjustable in the panel; emission, underwater strength,
+breakup, spreading, exchange and the source algorithm are in **Advanced foam**.
 
 The defaults are emission **1.20**, surface lifetime **1.5 s**, breakup **1.00**,
 spreading **0.56 m²/s**, shallow-to-deep exchange **0.29/s**, and underwater
 bubbles **1.25**.
 
-Foam uses the appearance from before the wind-streak experiment. The experimental
-streak history and extra immediate crest overlay have been removed. Saved scenes
-keep their RGB foam history and active controls; retired layer settings and
-streak maps are ignored when loaded.
+Fresh surface foam stays connected and becomes more perforated as it ages.
+Coverage is filtered before rendering so distant whitecaps keep their area.
+Subtle, metre-scaled foam relief affects only the material, never the waves.
+The wind-streak experiment remains removed. Saved scenes keep their RGB history
+and original emission model; retired layer settings and streak maps are ignored.
 
 Saved scenes include adjacent `.foam_state.npz` and, for comparisons,
 `.comparison_foam_state.npz` checkpoints. Keep these files beside their scene
 JSON. Exports resume the saved history, including at higher wave resolutions.
 Without a checkpoint, offline renders build six seconds of foam before the
 first output frame; use `--foam-preroll 0` for a fresh start or `--no-foam` for
-the original shading. Old scenes without foam settings keep their original look.
+immediate crest shading. Old scenes without foam settings keep foam disabled.
 
 The camera preserves the original Z-up Maya center-of-interest model:
 
@@ -109,8 +121,7 @@ The camera preserves the original Z-up Maya center-of-interest model:
 
 The comparison uses Pierson–Moskowitz with positive cosine-squared spreading
 and zero swell for **Tessendorf mode**. Seed, camera, scale,
-dispersion and shading are shared. Each side uses the original viewer's crest
-normalization for its own wave field.
+dispersion and shading are shared. Both sides use the same foam settings.
 
 **Camera & light → Open HDR sky** loads a local latitude/longitude `.hdr` or
 `.exr`. Alternatively:
@@ -129,9 +140,22 @@ loads by default. The viewer uses the full 4000×2000 reflection HDR; automatic
 discovery prefers a pack's `_Ref` panorama over its small `_Env` lighting map.
 The pack remains in the ignored `assets/local/` directory for this checkout.
 
-The water shader is ported from this project's `OceanTestShaders.cpp`, including
-the scattering, Fresnel, crest shading, gamma and fog. The starting camera uses
-the original framing rule and is well above the surface.
+**Camera & light → Compose view** offers the raised overview, a storm horizon,
+and a view across the crests. These change only camera and lighting. The starting
+camera still uses the original Maya framing rule, well above the surface.
+
+The default **Presentation** material uses bounded dielectric reflection,
+refraction-aware water scattering, integrated HDR sky lighting, filtered GGX
+reflections, and sky-lit surface foam. Wave detail smaller than a pixel broadens
+the reflection instead of sparkling. Four-sample antialiasing resolves in linear
+HDR before a neutral highlight rolloff and sRGB display conversion.
+
+The local autumn panorama is reprojected from its upper sky to remove buildings
+and turbines; sky and sea share a continuous haze at the horizon. No modified
+HDR file is written or distributed. **Water shading → Original 2015** keeps the
+previous GLSL-derived material and original panorama available for comparison.
+See [rendering notes and references](docs/IMPLEMENTATION.md#presentation-rendering)
+for the approximations and validation.
 
 ### Scenes, stills and movies
 
@@ -163,6 +187,18 @@ Use `--sky`, `--width`, `--height`, `--fps`, `--time` (single shots),
 (CRF 16). Full-quality ocean movies need several GB of free space. Existing
 outputs require `--overwrite`. Failed exports discard their temporary movie and
 leave an existing completed output intact.
+
+For a short presentation review, reproducible lighting comparisons, or a complete
+GPU frame benchmark:
+
+```sh
+PYTHONPATH=python .venv/bin/python tools/presentation_review.py
+PYTHONPATH=python .venv/bin/python tools/visual_review.py
+PYTHONPATH=python .venv/bin/python tools/benchmark_visualizer.py
+```
+
+Review captures and movies stay under the ignored `renders/` directory. The
+visual-review manifest records hashes of the displacement and normal fields.
 
 ### Numerical verification and device acceptance
 

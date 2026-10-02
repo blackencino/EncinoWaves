@@ -2,7 +2,8 @@
 from dataclasses import dataclass, replace
 from .model import Wave_parameters
 from .render import Camera, Look
-from .camera import frame_domain
+from .camera import frame_domain, look_at
+import math
 
 
 @dataclass(frozen=True)
@@ -39,3 +40,24 @@ SCENES = (
 def scene_with_resolution(index, resolution):
     scene = SCENES[index]
     return replace(scene, parameters=replace(scene.parameters, resolution=resolution))
+
+
+@dataclass(frozen=True)
+class Presentation_view:
+    name: str
+    camera: Camera
+    look: Look
+
+
+def presentation_views(domain=512.0):
+    """Camera/light compositions only; none change the ocean parameters."""
+    scale=min(domain,512.0)/512.0
+    heading=math.radians(-165)
+    return (
+        Presentation_view("Overview",frame_domain(min(domain,512.0)),Look()),
+        Presentation_view("Storm horizon",look_at((425*scale,-425*scale,95*scale),fov=48),
+                          Look(exposure=.3,sky_rotation=40,haze=1.3)),
+        Presentation_view("Across the crests",
+            look_at((-430*math.sin(heading)*scale,-430*math.cos(heading)*scale,75*scale),fov=44),
+            Look(exposure=.45,sky_rotation=45,haze=.85)),
+    )
