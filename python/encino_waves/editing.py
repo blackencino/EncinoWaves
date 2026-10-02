@@ -98,9 +98,7 @@ def _spectrum(p, omega):
         log_s = math.log(.076*x**-.22*p.gravity**2)-5*torch.log(w)-1.25*(wm/w)**4+peak
     result = torch.exp(log_s)
     if p.spectrum == "tma":
-        # Same depth factor: sigmoid(2*x) == .5 + .5*tanh(x). The direct
-        # sigmoid avoids cancellation in the small-factor end of the curve.
-        result = result*torch.sigmoid(3.6*(w*math.sqrt(p.depth/p.gravity)-1.125))
+        result = result*(.5+.5*torch.tanh(1.8*(w*math.sqrt(p.depth/p.gravity)-1.125)))
     return torch.where(omega > 0, result, 0)
 
 

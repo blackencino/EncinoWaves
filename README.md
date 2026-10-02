@@ -30,9 +30,8 @@ requires a GPU; CPU reference work must explicitly request `--device cpu`.
 ### Artist controls
 
 The viewer exposes wind speed, fetch, depth, swell, wind direction and the four
-directional spreading models. **Hasselmann** is the default. Advanced controls
-include resolution through 4096², patch size, spectrum, dispersion, pinch and
-random seed. Units are metres,
+directional spreading models. Advanced controls include resolution through
+4096², patch size, spectrum, dispersion, pinch and random seed. Units are metres,
 seconds, m/s, and kilometres of fetch. The original extended slider ranges are
 retained; the extreme wind settings are artist controls, not a claim that the
 empirical data validates every such condition. Ctrl-click a slider to enter a value.
@@ -58,15 +57,6 @@ time scrubbing also clear history. Rotating the ocean rotates the existing foam.
 The map defaults to 512² independently of wave resolution, with options through
 2048². Emission, lifetime, breakup, spreading, exchange, and underwater strength
 are adjustable in the panel.
-
-The defaults are emission **1.20**, surface lifetime **1.5 s**, breakup **1.00**,
-spreading **0.56 m²/s**, shallow-to-deep exchange **0.29/s**, and underwater
-bubbles **1.25**.
-
-Foam uses the appearance from before the wind-streak experiment. The experimental
-streak history and extra immediate crest overlay have been removed. Saved scenes
-keep their RGB foam history and active controls; retired layer settings and
-streak maps are ignored when loaded.
 
 Saved scenes include adjacent `.foam_state.npz` and, for comparisons,
 `.comparison_foam_state.npz` checkpoints. Keep these files beside their scene

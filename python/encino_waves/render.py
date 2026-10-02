@@ -19,14 +19,7 @@ class Look:
     foam: float = 1.0
     crest_threshold: float = 0.5
     crest_maximum: float = 1.1
-    aeration: float = 1.25
-
-    @classmethod
-    def from_dict(cls, values):
-        # The immediate crest overlay was added with the wind-streak experiment.
-        # Older scenes retain lighting settings while using the restored foam.
-        return cls(**{name:value for name,value in values.items()
-                      if name not in {"crest_foam", "crest_breakup"}})
+    aeration: float = 1.0
 
 
 @dataclass(frozen=True)

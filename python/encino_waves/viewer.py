@@ -270,9 +270,9 @@ class Viewer:
         saved=json.loads(Path(path).read_text())
         self.parameters=Wave_parameters(**saved.get("requested_parameters",saved["parameters"]))
         self.camera=Camera(**saved["camera"])
-        self.look=Look.from_dict(saved["look"])
+        self.look=Look(**saved["look"])
         self.time=saved.get("time",10.0)
-        self.foam_parameters=Foam_parameters.from_dict(saved.get("foam",{"enabled":False}))
+        self.foam_parameters=Foam_parameters(**saved.get("foam",{"enabled":False}))
         self.foam_state=load_foam(Path(path).parent/saved["foam_state"],self.device_name) if saved.get("foam_state") else None
         self.comparison_foam_state=load_foam(Path(path).parent/saved["comparison_foam_state"],self.device_name) if saved.get("comparison_foam_state") else None
         self.comparing=saved.get("comparison",False)
