@@ -192,7 +192,9 @@ def _same_dispersion(a, b):
 
 def edit_state(basis, previous, parameters, time):
     """Retain the wave tensors for mesh rotation; retune other edits in phase."""
-    if parameters.in_ocean_space() == previous.parameters.in_ocean_space():
+    spatial = ("wind_direction", "pinch", "amplitude_gain", "trough_damping",
+               "trough_small_wavelength", "trough_big_wavelength", "trough_soft_width")
+    if replace(previous.parameters, **{name:getattr(parameters, name) for name in spatial}) == parameters:
         return replace(previous, parameters=parameters)
     return preserve_phase(previous, state_from_basis(basis, parameters), time)
 
@@ -249,7 +251,8 @@ def follow_parameters(current, target, elapsed, response=.10):
         raise ValueError("domain, resolution, or seed changed; create a new wave basis")
     amount = -math.expm1(-elapsed/response)
     values = {}
-    for name in ("wind_speed", "fetch_km", "depth", "swell", "wind_direction", "pinch", "amplitude_gain"):
+    for name in ("wind_speed", "fetch_km", "depth", "swell", "wind_direction", "pinch", "amplitude_gain",
+                 "trough_damping", "trough_small_wavelength", "trough_big_wavelength", "trough_soft_width"):
         a, b = getattr(current, name), getattr(target, name)
         if name in ("wind_speed", "fetch_km", "depth"):
             distance = math.log(b/a)

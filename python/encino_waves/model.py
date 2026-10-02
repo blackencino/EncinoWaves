@@ -3,7 +3,8 @@
 
 make_initial_state is the float64 CPU reference setup. The editing module
 separates the seed from GPU spectral evaluation for continuous controls. All
-per-frame work, including six batched inverse FFTs, runs on the selected GPU.
+per-frame work runs on the selected GPU: six batched inverse FFTs, plus six
+for the optional spatial trough filter.
 No autograd, hidden evaluation history, amplitude normalization, or extra layers.
 """
 from dataclasses import dataclass, replace
@@ -11,6 +12,7 @@ import math
 import numpy as np
 from scipy.special import expit, gammaln
 import torch
+from .trough import crest_from_derivatives, damp_troughs
 
 
 @dataclass(frozen=True)
@@ -33,12 +35,22 @@ class Wave_parameters:
     seed: int = 54321
     gamma: float = 3.3
     convention: str = "paper"
+    trough_damping: float = .5
+    trough_small_wavelength: float = 1.0
+    trough_big_wavelength: float = 4.0
+    trough_soft_width: float = 2.0
+
+    @classmethod
+    def from_dict(cls, values):
+        # Saved oceans from before this port had no spatial trough filter.
+        return cls(**{"trough_damping": 0.0, **values})
 
     def __post_init__(self):
         n = self.resolution
         if not isinstance(n, int) or n < 16 or n > 4096 or n & (n - 1):
             raise ValueError("resolution must be a power of two from 16 to 4096")
-        for name in ("domain", "wind_speed", "fetch_km", "depth", "gravity", "density", "gamma"):
+        for name in ("domain", "wind_speed", "fetch_km", "depth", "gravity", "density", "gamma",
+                     "trough_small_wavelength", "trough_big_wavelength", "trough_soft_width"):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
@@ -47,6 +59,10 @@ class Wave_parameters:
                 raise ValueError(f"{name} must be finite")
         if not -1 <= self.swell <= 2:
             raise ValueError("swell must be in [-1, 2]")
+        if not 0 <= self.trough_damping <= .5:
+            raise ValueError("trough_damping must be in [0, 0.5]")
+        if self.trough_small_wavelength > self.trough_big_wavelength:
+            raise ValueError("trough wavelength band must be ordered")
         if self.surface_tension < 0 or self.amplitude_gain < 0:
             raise ValueError("surface_tension and amplitude_gain cannot be negative")
         if self.spreading not in ("cosine_squared", "mitsuyasu", "hasselmann", "donelan_banner"):
@@ -339,10 +355,9 @@ def evaluate(state, time):
     # FFTW/cufft C2R are unnormalized. norm='forward' is essential: the
     # default inverse scaling would make the sea shrink with resolution.
     fields = torch.fft.irfft2(state.multipliers*h[None], s=(p.resolution, p.resolution), norm="forward")
-    height, dx, dy, dxx, dyy, dxy = fields.unbind()
-    jxx, jyy, jxy = 1-p.pinch*dxx, 1-p.pinch*dyy, -p.pinch*dxy
-    minimum = .5*(jxx+jyy-torch.sqrt((jxx-jyy).square()+4*jxy.square()))
-    displacement = torch.stack((-p.pinch*dx, -p.pinch*dy, p.amplitude_gain*height, -minimum), dim=-1)
+    crest = crest_from_derivatives(*fields[3:].unbind(), p.pinch)
+    height, dx, dy = damp_troughs(p, h, state.multipliers, fields).unbind()
+    displacement = torch.stack((-p.pinch*dx, -p.pinch*dy, p.amplitude_gain*height, crest), dim=-1)
     # ComputeNormalsWithPinching from Normals.h: central differences of
     # actual displaced points, with periodic neighbors and unwrapped spacing.
     points=displacement[...,:3]

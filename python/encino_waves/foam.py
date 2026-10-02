@@ -227,7 +227,7 @@ def load_foam(path, device="auto"):
         # Version 2 may also contain a windrows array. Restore only the original
         # RGB density; the retired layer must never re-enter the surface texture.
         p = Foam_parameters.from_dict(json.loads(str(data["parameters"])))
-        waves = Wave_parameters(**json.loads(str(data["waves"])))
+        waves = Wave_parameters.from_dict(json.loads(str(data["waves"])))
         density = data["density"]
         if (density.shape != (3,p.resolution,p.resolution) or density.dtype != np.float32 or
                 not np.isfinite(density).all() or np.any(density < 0)):

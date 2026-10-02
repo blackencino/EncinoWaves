@@ -67,7 +67,7 @@ def test_all_inverse_transforms_against_fftw(device):
     if device=="mps" and not torch.backends.mps.is_available(): pytest.skip("Metal not visible")
     if device=="cuda" and not torch.cuda.is_available(): pytest.skip("CUDA not visible")
     fftw=pytest.importorskip("pyfftw.interfaces.numpy_fft")
-    p=Wave_parameters(resolution=128,spreading="hasselmann",depth=13)
+    p=Wave_parameters(resolution=128,spreading="hasselmann",depth=13,trough_damping=0)
     state=make_initial_state(p,device)
     pos,neg,w=(t.cpu().numpy() for t in (state.h_positive,state.h_negative,state.omega))
     for time in (0,1.25,120):

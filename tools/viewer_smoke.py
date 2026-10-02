@@ -23,6 +23,15 @@ try:
     pixels = np.asarray(canvas.draw())
     assert viewer.frames == 2
     Image.fromarray(pixels).save('renders/viewer_ui.png')
+    assert viewer.parameters.trough_damping == .5
+    initial_coefficients=viewer.state.h_positive
+    for amount in (0,.5):
+        viewer.edit_parameters(trough_damping=amount)
+        with patch('encino_waves.editing.state_from_basis',side_effect=AssertionError('Damping rebuilt the spectrum')):
+            for i in range(120): viewer._update_parameters(1/60)
+        canvas.draw()
+        assert viewer.state.parameters.trough_damping == amount
+        assert viewer.state.h_positive is initial_coefficients
     before = viewer.camera
     viewer.on_pointer({'event_type':'pointer_down','x':400,'y':300,'buttons':(1,),'modifiers':('Alt',)})
     viewer.on_pointer({'event_type':'pointer_move','x':450,'y':310,'buttons':(1,),'modifiers':('Alt',)})
@@ -102,7 +111,7 @@ try:
         return original_header(label)
     imgui.collapsing_header = expanded_header
     canvas.draw()
-    print('Viewer UI, wave edits, rotation, RGB foam replay/reset, Maya events, comparison, and all panels passed',flush=True)
+    print('Viewer UI, wave edits, trough damping, rotation, RGB foam replay/reset, Maya events, comparison, and all panels passed',flush=True)
 finally:
     viewer.executor.shutdown(wait=True,cancel_futures=True)
     canvas.close()

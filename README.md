@@ -46,6 +46,14 @@ The controls have a short, 0.1-second response to smooth pointer motion. Domain,
 resolution and seed changes build a new wave basis. Space pauses propagation
 while leaving these controls live.
 
+**Trough damping** is on by default at **0.5**, its maximum. It restores the
+original spatial filter: the selected short-wave detail becomes quieter in the
+troughs while retaining at least half its amplitude. The original 1–4 m band and
+2 m transition are used. Toggle it or reduce the amount in **Resolution & model**;
+edits preserve the wave realization and phase. This is a production appearance
+filter applied after spectral synthesis. Older saved scenes retain their previous
+undamped surface until it is enabled explicitly.
+
 The **Foam & aeration** panel adds a separate, persistent RGB map: surface foam,
 shallow bubbles, and deeper bubbles. Crests emit through slowly evolving fractal
 breakup; existing foam diffuses, fades, and exchanges from shallow to deep.

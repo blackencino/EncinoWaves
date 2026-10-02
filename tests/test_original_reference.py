@@ -14,7 +14,7 @@ def original_values():
     values = np.loadtxt(path, skiprows=1).reshape(16, 9, 11)
     p = Wave_parameters(resolution=16, domain=100, wind_speed=17, fetch_km=300,
                         depth=20, swell=.35, spreading="hasselmann",
-                        convention="legacy_2015", gamma=gamma)
+                        convention="legacy_2015", gamma=gamma, trough_damping=0)
     return p, values
 
 

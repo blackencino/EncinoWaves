@@ -31,7 +31,8 @@ frames after warmup, with no simultaneous render:
 | 2048² | 2.07 s | 18.54 ms | 20.50 ms | 2.71 ms |
 | 4096² | 8.45 s | 76.78 ms | 78.35 ms | 10.88 ms |
 
-Compute includes propagation, six inverse transforms, crests and normals.
+These measurements predate trough damping and describe the unfiltered path:
+propagation, six inverse transforms, crests and normals.
 These are **not viewer frame rates**: texture upload, rendering, UI, presentation
 and encoding are additional. Readback is one measured transfer, not a percentile.
 1024² is the interactive default; 2048² and 4096² are useful export resolutions.
@@ -52,12 +53,14 @@ Tensor members are read-only by API contract; PyTorch has no const tensor type.
 `make_wave_basis` followed by `state_from_basis`: CPU setup fixes the lattice and
 random variates once; the paper's spectrum, directional spreading, normalization,
 and dispersion are then evaluated on the Torch GPU. This post-seed stage feeds
-propagation, six inverse FFTs, crest extraction and displaced-surface normals.
+propagation, six inverse FFTs, crest extraction, optional trough damping and
+displaced-surface normals. Trough damping adds a second batch of six inverse FFTs.
 The two signs of travelling waves have separate random amplitudes and phases,
 as required by section 7.1.2 of the paper.
 
-No extra wave layers, procedural surface noise, amplitude fitting, or band-pass
-filters are added to the ocean. Domain size is in metres, fetch in kilometres,
+The spectral synthesis uses the paper equations without extra wave layers or
+amplitude fitting. The separate spatial trough filter is described below.
+Domain size is in metres, fetch in kilometres,
 wind in m/s, depth in metres. The domain is a periodic patch. Resolution changes
 preserve the random variates at shared wavenumbers.
 
@@ -132,7 +135,8 @@ rendering omitted (30 samples at 1024/2048, 20 at 4096):
 | 2048² | 0.38 s | 6.66 ms median / 7.12 ms p95 | 18.75 ms median |
 | 4096² | 1.51 s | 27.01 ms median / 27.72 ms p95 | 77.90 ms median |
 
-These exclude texture transfers, graphics and UI. Run
+These unfiltered measurements exclude trough damping, texture transfers,
+graphics and UI. Run
 `python tools/benchmark_editing.py --resolution 1024 --device mps` (or `cuda`)
 to measure the editing path separately from the static reference setup above.
 CUDA uses the same tensor operations; NVIDIA hardware remains untested here.
@@ -214,6 +218,81 @@ complex fields, dispersion and multipliers in an NPZ with parameters. They allow
 the same realization to move between CPU, Metal and CUDA; the transform tolerance
 still reflects float32 arithmetic. Recreating every historical seed from parameters
 alone is not established, because of the stochastic stream distinction above.
+
+## Spatial trough damping
+
+`trough.py` ports the active trough-damping path in the original
+`src/EncinoWaves/Propagation.h` and `Filter.h`. It is enabled at 0.5 by default;
+both the GPU implementation and maintained C++ path cap the reduction at 0.5.
+This is a separate production appearance filter, not an alteration of the
+paper's spectrum or a claim that the spatially modified result has the same PSD.
+
+The original inverted smooth wavelength band removes detail from 1 to 4 metres,
+with transitions from 0 to 1 and 4 to 6 metres. A second batch of six inverse
+FFTs produces filtered height, horizontal displacement and displacement
+derivatives. Its negative minimum eigenvalue supplies the spatial guide, using
+the original fixed positive pinch of 1.25 even when displayed pinch is zero.
+With `z = (guide - mean(guide)) / (2.2 * std(guide))`, the retention is
+`1 - amount + amount * smoothstep(0, 1, z)`. Height and horizontal displacement
+are `filtered + retention * (original - filtered)`. The selected detail retains
+between 50% and 100% of its amplitude at maximum strength.
+
+As in the original active C++ path, the emission crest map is preserved. Normals
+are computed from the final displaced points, so they include the spatial blend's
+gradient. Flat guide fields bypass damping rather than divide by zero. The GPU
+statistics count each periodic texel once; the old C++ statistics also counted
+the duplicated border. Turning the filter off skips the extra FFTs entirely.
+Live amount/band edits reuse the spectral tensors and phase history. Parameters
+are explicit values saved with scenes and spectral snapshots; older saved oceans
+without trough settings load with damping off for surface compatibility.
+
+Tests compare the spatial result to an independent double-precision FFTW
+reference and verify attenuation bounds, mask orientation, final-surface normals,
+flat water, unchanged crest emission, live edits and snapshot replay on CPU/Metal.
+`python tools/trough_preview.py` makes an ignored local on/off movie and stills,
+sharing one foam history and the installed HDR between both views.
+
+On this M2 Max, 10 synchronized propagation samples after three warmups,
+excluding texture transfers, foam, rendering and UI:
+
+| Resolution | Damping off, median | Damping 0.5, median |
+| --- | --- | --- |
+| 1024² | 4.80 ms | 6.45 ms |
+| 2048² | 18.58 ms | 25.67 ms |
+| 4096² | 76.84 ms | 110.46 ms |
+
+Run `python tools/benchmark_trough.py --device mps` (or `cuda`) to compare the
+two paths. These are compute times, not complete viewer frame rates.
+
+## Two-domain repetition reduction: next experiment
+
+This remains a design proposal, deliberately separate from the trough port.
+Two independent realizations with different physical periods can reduce visible
+repetition. FFT array dimensions can stay powers of two: it is the domain lengths
+in metres that need a poorly commensurate ratio. An irrational ratio has no exact
+shared period in ideal arithmetic; a co-prime integer pair has a long least common
+multiple. Neither fact alone guarantees that recognizable swell stops repeating.
+
+Use smooth nonnegative **power** windows `W0(k) + W1(k) = 1` over the covered
+wavenumbers, allocating all power to the supported field outside their overlap.
+Evaluate the same physical spectrum on each lattice, including that lattice's
+own `(2*pi/L)^2` integration area, and multiply spectral amplitudes by `sqrt(Wi)`.
+Use independent random streams so cross-covariance vanishes in expectation.
+The sum then targets the original spectral power, subject to the ordinary
+finite-lattice sampling and band-limit error; it does not preserve the old
+individual realization. Check band-integrated energy across seeds, significant
+wave height and directional moments before judging rendered comparisons.
+
+Sample both fields in world coordinates and combine displacements/derivatives
+before computing nonlinear crest and normal quantities. Baking the sum back into
+one existing periodic map would reintroduce its short period. A single periodic
+foam map cannot represent the full combined crest history exactly, so foam
+storage and the placement of trough damping need explicit treatment too.
+
+Spectrum partitioning into displacement cascades is also described in
+[Arc Blanc, section 3.3](https://jcgt.org/published/0014/01/05/paper-lowres.pdf).
+Its hard bands and domain sizes differ from the proposed overlapping,
+poorly commensurate two-domain experiment above.
 
 ## Original viewer baseline
 

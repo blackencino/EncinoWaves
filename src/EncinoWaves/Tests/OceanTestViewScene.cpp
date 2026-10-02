@@ -176,7 +176,7 @@ ViewScene::ViewScene(const ewav::Parametersf& i_params,
 
   // Trough stuff
   pedit.reset(new FloatParamEditor("trough damping", &m_params.troughDamping,
-                                   0.0f, 1.0f, 0.05f, 0.1f));
+                                   0.0f, 0.5f, 0.05f, 0.1f));
   m_paramEdits.push_back(pedit);
 
   pedit.reset(new FloatParamEditor("trough damping small wavelength",

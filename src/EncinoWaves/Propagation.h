@@ -532,6 +532,10 @@ void Propagation<T>::propagate(const Parameters<T> &i_params,
 
   // Get Stats about FiltH and FiltMinE
   Stats<T> stats(FiltHeight, FiltMinE);
+  // A flat guide field has no troughs to distinguish; avoid 0/0 statistics.
+  if (stats.StdDevMinE <= T(1e-8)) {
+    return;
+  }
 
   // Compute interpolant from stats.
   {
@@ -540,7 +544,7 @@ void Propagation<T>::propagate(const Parameters<T> &i_params,
     F.BiasMinE = -stats.MeanMinE / (T(2) * stats.StdDevMinE);
     F.MinClipE = 0.0;
     F.MaxClipE = 1.1;
-    F.MinInterpolant = T(1) - i_params.troughDamping;
+    F.MinInterpolant = T(1) - Imath::clamp(i_params.troughDamping, T(0), T(0.5));
     F.MinE_And_Interpolant = FiltMinE.data();
     // CJH HACK
     tbb::parallel_for(

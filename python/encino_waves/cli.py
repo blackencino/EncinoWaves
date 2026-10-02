@@ -106,7 +106,7 @@ def main(argv=None):
         foam_state=comparison_foam_state=None
         if args.scene:
             saved=json.loads(args.scene.read_text())
-            p=Wave_parameters(**saved["parameters"])
+            p=Wave_parameters.from_dict(saved["parameters"])
             if requested_resolution: p=replace(p,resolution=requested_resolution)
             camera=Camera(**saved["camera"]); look=Look.from_dict(saved["look"])
             if args.sky is None and saved.get("sky"): args.sky=Path(saved["sky"])

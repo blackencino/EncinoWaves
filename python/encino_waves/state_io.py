@@ -20,7 +20,7 @@ def load_initial_state(path,device="auto"):
     with np.load(path,allow_pickle=False) as data:
         version=int(data["version"])
         if version not in (1,2,3): raise ValueError("Unsupported spectral snapshot version")
-        p=Wave_parameters(**json.loads(str(data["parameters"])))
+        p=Wave_parameters.from_dict(json.loads(str(data["parameters"])))
         if version < 3:
             # Older snapshots already baked direction into the stored spectrum.
             # Preserve their exact field without applying a second rotation.

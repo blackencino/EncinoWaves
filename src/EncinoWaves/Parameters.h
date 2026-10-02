@@ -161,7 +161,7 @@ struct Parameters {
     , fetch(300.0)
     , pinch(0.75)
     , amplitudeGain(1.0)
-    , troughDamping(0.0)
+    , troughDamping(0.5)
     , troughDampingSmallWavelength(1.0)
     , troughDampingBigWavelength(4.0)
     , troughDampingSoftWidth(2.0) {}
