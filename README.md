@@ -4,7 +4,8 @@ This branch adds a functional Python GPU implementation and a native viewer.
 Ocean compute uses **PyTorch: Metal on Apple silicon, CUDA on NVIDIA**. Graphics
 use **wgpu: Metal, Vulkan, or D3D12**. The original C++ source remains in `src/`.
 The presentation renderer adds environment lighting, filtered reflections and
-persistent foam without changing the wave formulation or trough filter.
+persistent foam without changing the wave formulation. Optional trough damping
+is a separate spatial appearance filter.
 
 ### Run
 
@@ -59,14 +60,17 @@ The controls have a short, 0.1-second response to smooth pointer motion. Domain,
 resolution and seed changes build a new wave basis. Space pauses propagation
 while leaving these controls live.
 
-**Trough damping** is on by default at **0.5**, with a range of **0–1**. It restores the
-original spatial filter: the selected short-wave detail becomes quieter in the
-troughs, retaining at least half its amplitude at the default setting. At 1,
-the selected detail can be fully damped in the troughs. The original 1–4 m band and
-2 m transition are used. Toggle it or adjust the amount in **Resolution & model**;
-edits preserve the wave realization and phase. This is a production appearance
-filter applied after spectral synthesis. Older saved scenes retain their previous
-undamped surface until it is enabled explicitly.
+**Trough damping** is on by default at **0.5**, with a range of **0–1**. It smooths
+the synthesized height field over a small world-space distance, then blends
+toward that surface only in low troughs. The default 10 cm smoothing radius
+(Gaussian sigma) quiets ripples around half a metre and smaller. Horizontal
+displacement and the crest source stay unchanged; no extra FFTs are needed.
+The blend is at most halfway at 0.5, and fully smoothed in deep troughs at 1.
+Toggle it or adjust the amount in **Resolution & model**; edits preserve phase.
+If the wave grid cannot resolve those ripples, damping does nothing: a 512 m
+patch at 1024² is unchanged. This corrects the earlier metre-scale filter, which
+altered the broad wave character. Scenes saved before trough damping existed
+still load with it off.
 
 The **Foam & aeration** panel controls a separate, persistent RGB map: surface foam,
 shallow bubbles, and deeper bubbles. Breaking crests emit through slowly evolving

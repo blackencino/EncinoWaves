@@ -70,8 +70,9 @@ Tensor.cpu/NumPy field packing during animation; and limit calibration reads
 to three values. The existing complete viewer smoke test exercises comparison,
 physical edits, foam reset/replay and saved-scene round trips through this path.
 
-On this M2 Max, 20 samples per mode after four warmups, alternating host/Metal
-order, no other ocean viewer running, 512² foam and default 0.5 trough damping:
+Historical measurements before the spatial trough repair: on this M2 Max,
+20 samples per mode after four warmups, alternating host/Metal order, no other
+ocean viewer running, 512² foam and the earlier 0.5 trough filter:
 
 | Wave resolution | Host transfer | Metal transfer | Host full frame | Metal full frame |
 | --- | ---: | ---: | ---: | ---: |
@@ -290,53 +291,77 @@ alone is not established, because of the stochastic stream distinction above.
 
 ## Spatial trough damping
 
-`trough.py` ports the active trough-damping path in the original
-`src/EncinoWaves/Propagation.h` and `Filter.h`. It is enabled at 0.5 by default;
-both the GPU implementation and maintained C++ path allow amounts from 0 to 1.
+`trough.py` applies a periodic, separable Gaussian to the already synthesized
+height field. It needs no additional forward or inverse FFTs. The amount is
+0.5 by default, with a 0–1 range. The maintained C++ path uses the same method.
 This is a separate production appearance filter, not an alteration of the
 paper's spectrum or a claim that the spatially modified result has the same PSD.
 
-The original inverted smooth wavelength band removes detail from 1 to 4 metres,
-with transitions from 0 to 1 and 4 to 6 metres. A second batch of six inverse
-FFTs produces filtered height, horizontal displacement and displacement
-derivatives. Its negative minimum eigenvalue supplies the spatial guide, using
-the original fixed positive pinch of 1.25 even when displayed pinch is zero.
-With `z = (guide - mean(guide)) / (2.2 * std(guide))`, the retention is
-`1 - amount + amount * smoothstep(0, 1, z)`. Height and horizontal displacement
-are `filtered + retention * (original - filtered)`. The selected detail retains
-between 50% and 100% of its amplitude at the 0.5 default, and between 0% and 100%
-at maximum strength (1).
+The public `trough_smoothing_length` is Gaussian sigma in world metres, default
+0.1 m. Its half-amplitude wavelength is approximately 0.53 m; much shorter
+ripples are strongly smoothed. The kernel is truncated at three sigma, with a
+maximum radius of 16 grid samples. Exceptionally fine grids cap effective sigma
+at `16 * spacing / 3` instead of creating a very wide kernel. The filter bypasses
+grids whose shortest diagonal wavelength exceeds `5 * sigma`; a 512 m domain
+at 1024² therefore remains bit-identical. It does not widen its physical scale
+to create a visible effect on an under-resolved ocean.
 
-As in the original active C++ path, the emission crest map is preserved. Normals
-are computed from the final displaced points, so they include the spatial blend's
-gradient. Flat guide fields bypass damping rather than divide by zero. The GPU
-statistics count each periodic texel once; the old C++ statistics also counted
-the duplicated border. Turning the filter off skips the extra FFTs entirely.
-Live amount/band edits reuse the spectral tensors and phase history. Parameters
-are explicit values saved with scenes and spectral snapshots; older saved oceans
-without trough settings load with damping off for surface compatibility.
+For smoothed height `s`, `wet = amount * smoothstep(0, 1,
+(mean(s) - s) / (sqrt(2) * std(s)))`. The result is `h + wet * (s - h)`.
+This uses height relative to mean sea level: the upper half is completely dry,
+and the blend grows smoothly into troughs. Flat water bypasses the mask safely.
+Statistics count each periodic texel once. Only height changes; horizontal
+displacement and the original crest source remain exact. Normals are recomputed
+from the final displaced points. Live amount/length edits reuse spectral tensors
+and accumulated phase.
 
-Tests compare the spatial result to an independent double-precision FFTW
-reference and verify attenuation bounds, mask orientation, final-surface normals,
-flat water, unchanged crest emission, live edits and snapshot replay on CPU/Metal.
-`python tools/trough_preview.py` makes an ignored local on/off movie and stills,
-sharing one foam history and the installed HDR between both views.
+The earlier port faithfully reproduced an unsuitable historical filter: its
+1–4 m spectral band and compression-based mask changed the broad wave profile
+and also damped horizontal displacement. Matching that implementation was not
+a correctness check for the intended centimetre-scale effect. The spatial
+replacement still has a small, measurable effect on broad-wave curvature; a
+local Gaussian is not a perfect spectral cutoff. In the analytic 8 m wave plus
+25 cm ripple case, full damping changes broad amplitude by about 0.14%, while
+reducing ripple RMS in the deepest trough to about 4.5% of its original value.
+The default amount halves the blend.
 
-On this M2 Max, 10 synchronized propagation samples after three warmups,
-excluding texture transfers, foam, rendering and UI:
+Saved parameters identify this method with `trough_filter_revision: 3`.
+The old default band `(1, 4, 2)` migrates to sigma 0.1 m. Explicit custom bands
+map approximately to `(big_wavelength + soft_width) / 5`; this retains their
+rough scale, not the old filter response. New explicit smoothing lengths round
+trip unchanged. Scenes without any trough settings still load with damping off.
 
-| Resolution | Damping off, median | Damping 0.5, median |
-| --- | --- | --- |
-| 1024² | 4.80 ms | 6.45 ms |
-| 2048² | 18.58 ms | 25.67 ms |
-| 4096² | 76.84 ms | 110.46 ms |
+Tests check the continuous Gaussian response, periodic boundaries, physical
+scale across grids, localization, broad amplitude and phase, exact XY/crest
+preservation, final-surface normals, live edits and snapshot replay. They also
+verify that propagation still performs only the original six-field batched
+inverse FFT. `tools/trough_preview.py` produces an ignored local on/off movie
+and stills sharing one foam history and the installed HDR. Its smaller patch
+resolves the intended ripple scale.
 
-Run `python tools/benchmark_trough.py --device mps` (or `cuda`) to compare the
-two paths. These are compute times, not complete viewer frame rates.
+The C++ regression compiles the actual helper in `Propagation.h` with serial
+scheduling adapters, then compares float/double output with Python. It checks
+padded seams, flat fields, defaults and exact bypasses. This verifies the helper;
+the complete legacy viewer remains unbuilt here because its FFTW/TBB headers
+are unavailable.
+
+Run `python tools/benchmark_trough.py --device mps` (or `cuda`) for synchronized
+compute timings; these exclude texture transfers, foam, rendering and UI.
+On this M2 Max, 10 samples after three warmups with a 512 m patch:
+
+| Resolution | Damping off, median | Spatial damping 0.5, median |
+| --- | ---: | ---: |
+| 1024² | 4.84 ms | 4.78 ms (exact bypass) |
+| 2048² | 18.56 ms | 20.21 ms |
+| 4096² | 76.93 ms | 85.79 ms |
+
+The previous six-extra-IFFT filter measured 110.46 ms at 4096². These are compute
+times, not complete viewer frame rates; small differences in bypass timings are
+measurement variation.
 
 ## Two-domain repetition reduction: next experiment
 
-This remains a design proposal, deliberately separate from the trough port.
+This remains a design proposal, deliberately separate from the trough filter.
 Two independent realizations with different physical periods can reduce visible
 repetition. FFT array dimensions can stay powers of two: it is the domain lengths
 in metres that need a poorly commensurate ratio. An irrational ratio has no exact
@@ -366,12 +391,17 @@ poorly commensurate two-domain experiment above.
 
 ## Presentation rendering
 
-The `academy/visual-polish` work changes rendering and secondary foam only.
-`model.py`, `editing.py`, `trough.py`, and the C++ wave implementation are unchanged
-from the GPU-transfer branch. Fixed-state captures hash the displacement and
-normal arrays; the original and new material receive identical wave fields.
-The independent trough audit found the existing bounded spatial blend consistent
-with the original implementation, including its pre-damping crest source.
+The `academy/visual-polish` work changes rendering, secondary foam, and the
+separately requested trough appearance filter described above. The spectral
+wave formulation and phase evolution are unchanged. Fixed-state material
+comparisons use identical displacement, normal and foam arrays.
+
+The view-adaptive mesh bounds the camera frustum's intersection with a water
+slab. Its near bound can extend behind the camera's XY position in steep
+downward views, and its width uses camera depth rather than horizontal range.
+This removes the exposed wedges and near clipping when orbiting straight down
+or through the pole. Both materials use the corrected mesh; Maya controls,
+center of interest and projection are unchanged.
 
 The presentation path resolves a four-sample RGBA16F target in linear light,
 then applies exposure, Khronos PBR Neutral and exact sRGB encoding in a separate
@@ -399,8 +429,11 @@ multiple-scattering approximation. The viewer does not solve transport through
 the two faces of a thin crest, reflect other scene objects, or simulate underwater
 caustics. Clear-water absorption/scattering and bubble extinction are explicit
 material choices; the ocean spectrum is not recolored or reshaped to improve a
-shot. The water material uses subdued blue-green absorption/scattering, with
-reduced bubble return. Surface foam has diffuse reflectance 0.72–0.86 before its
+shot. The water material uses desaturated grey-green absorption/scattering with
+a slight warm undertone: absorption `(0.145, 0.115, 0.125)` and base scattering
+`(0.021, 0.022, 0.019)` in inverse metres. Closer RGB coefficients replace the
+previous turquoise body without tinting reflected sky or foam. Bubble return is
+subdued. Surface foam has diffuse reflectance 0.72–0.86 before its
 small mean-one detail modulation; it remains illuminated by the sky. Foam can
 legitimately be darker than a strong specular glint.
 
@@ -449,8 +482,9 @@ normal; unresolved slope energy increases foam roughness. No new displacement,
 per-frame CPU texture generation, asset download or distributed bitmap is used.
 
 The source, material integration, mip generation, HDR rendering and display pass
-all remain on the GPU during animation. Sequential M2 Max / Metal measurements
-include wave synthesis, trough damping, foam, native transfer and GPU completion.
+all remain on the GPU during animation. These historical sequential M2 Max /
+Metal measurements predate the spatial trough repair and include wave synthesis,
+the earlier trough filter, foam, native transfer and GPU completion.
 Times are median / p95 milliseconds; the new presentation path uses four samples.
 
 | Wave grid / output | Previous viewer | Presentation viewer |
@@ -619,14 +653,15 @@ describes minimum-eigenvalue emission and persistent, decaying whitecap textures
 ## Verification limits
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
-exercised locally. The presentation branch passed 218 numerical and rendering
-checks, with 28 unavailable-device/reference skips. The UI check exercises camera events, continuous
+exercised locally. After the spatial trough and camera fixes, the presentation
+branch passed 249 numerical and rendering checks, with 25 unavailable-device/
+reference skips. The UI check exercises camera events, continuous
 wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
 panels, including with the supplied Dutch Skies HDR. Direction edits preserve
 the exact spectral coefficients across all four spreading models. The UI test
 also forbids spectrum and FFT evaluation during a paused direction edit. Rotating
 mesh, camera and environment together reproduces the original rendered image
-within 0.003 mean 8-bit channel levels for both comparison seas. Saved rotated
+within 0.005 mean 8-bit channel levels for both comparison seas. Saved rotated
 scenes round-trip pixel-exactly and export through the movie renderer.
 Populated RGB foam checkpoints also round-trip pixel-exactly; reset leaves the
 wave frame unchanged. Foam tests check periodic mass conservation and translation,
