@@ -3,7 +3,10 @@
 from dataclasses import dataclass
 from pathlib import Path
 import math
+import os
+import warnings
 import numpy as np
+import torch
 import wgpu
 from .model import texture_arrays
 from .sky import load_sky
@@ -51,8 +54,13 @@ def make_device(canvas=None):
 
 class Ocean_renderer:
     """Owns graphics resources only; the core model has no renderer dependency."""
-    def __init__(self, device, sky=None, mesh_resolution=(640,384), target_format="rgba8unorm"):
+    def __init__(self, device, sky=None, mesh_resolution=(640,384), target_format="rgba8unorm", transfer=None):
         self.device = device
+        self.transfer_mode = transfer or os.environ.get("ENCINO_WAVES_TRANSFER","auto")
+        if self.transfer_mode not in ("auto","metal","host"):
+            raise ValueError("Texture transfer must be auto, metal, or host")
+        self.gpu_transfer = None
+        self.transfer_device = None
         self.format = target_format
         self.mesh_resolution = mesh_resolution
         self.uniform = device.create_buffer(size=192, usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
@@ -125,7 +133,37 @@ class Ocean_renderer:
     def _make_texture(self,width,height):
         return self.device.create_texture(size=(width,height,1),format="rgba16float",
             mip_level_count=int(math.log2(max(width,height)))+1,
-            usage=wgpu.TextureUsage.TEXTURE_BINDING|wgpu.TextureUsage.COPY_DST|wgpu.TextureUsage.RENDER_ATTACHMENT)
+            usage=wgpu.TextureUsage.TEXTURE_BINDING|wgpu.TextureUsage.COPY_DST|wgpu.TextureUsage.RENDER_ATTACHMENT
+                  |wgpu.TextureUsage.STORAGE_BINDING|wgpu.TextureUsage.COPY_SRC)
+
+    @property
+    def transfer_name(self):
+        return self.gpu_transfer.name if self.gpu_transfer else "Host texture upload"
+
+    def _select_transfer(self,compute_device):
+        if self.transfer_device == compute_device: return
+        self.gpu_transfer = None
+        if self.transfer_mode != "host" and compute_device.type == "mps":
+            try:
+                from .metal_transfer import Metal_transfer
+                self.gpu_transfer = Metal_transfer(self.device)
+            except (RuntimeError,OSError,AttributeError) as error:
+                if self.transfer_mode == "metal": raise
+                warnings.warn(f"Metal GPU transfer unavailable; using host texture uploads: {error}",RuntimeWarning)
+        elif self.transfer_mode == "metal":
+            raise ValueError("Metal texture transfer requires Torch MPS compute")
+        self.transfer_device = compute_device
+
+    def _initialize_textures(self,textures):
+        # Inform wgpu that level zero has been initialized before external Metal
+        # writes. Otherwise WebGPU's first-use safety clear would erase them.
+        encoder = self.device.create_command_encoder()
+        for texture in textures:
+            render_pass = encoder.begin_render_pass(color_attachments=[{
+                "view":texture.create_view(base_mip_level=0,mip_level_count=1),
+                "load_op":"clear","store_op":"store","clear_value":(0,0,0,0)}])
+            render_pass.end()
+        self.device.queue.submit([encoder.finish()])
 
     def _write_texture(self,texture,data):
         self.device.queue.write_texture({"texture":texture},data,
@@ -152,25 +190,38 @@ class Ocean_renderer:
             render_pass.end()
 
     def upload(self,frame):
-        maps = texture_arrays(frame)
-        n = maps[0].shape[0]
+        self._select_transfer(frame.displacement.device)
+        n = frame.parameters.resolution
         if n != self.wave_size:
             for texture in self.wave_textures:
                 texture.destroy()
             self.wave_size = n
             self.wave_textures = [self._make_texture(n,n) for _ in range(2)]
+            if self.gpu_transfer: self._initialize_textures(self.wave_textures)
             self.wave_mips = [self._make_mip_groups(texture) for texture in self.wave_textures]
             self._bind_textures()
-        for texture,data in zip(self.wave_textures,maps):
-            self._write_texture(texture,data)
+        if self.gpu_transfer:
+            self.gpu_transfer.upload_waves(frame,self.wave_textures)
+        else:
+            maps = texture_arrays(frame)
+            for texture,data in zip(self.wave_textures,maps):
+                self._write_texture(texture,data)
         parameters = frame.parameters.in_ocean_space()
         if self.statistics_parameters != parameters:
             # Original viewer takes these statistics once after initialization.
-            height=maps[0][...,2].astype(np.float32)
-            crest=maps[0][...,3].astype(np.float32)
-            self.big_height=max(.001,1.5*float(np.max(np.abs(height))))
-            self.crest_gain=1/max(1e-8,2*float(np.std(crest)))
-            self.crest_bias=-float(np.mean(crest))*self.crest_gain
+            if self.gpu_transfer:
+                # Match the display's half quantization, particularly for flat
+                # crests. Read only three reduced scalars on parameter changes.
+                display = frame.displacement[...,2:].to(torch.float16).float()
+                variance,mean = torch.var_mean(display[...,1],correction=0)
+                maximum,std,mean = torch.stack((display[...,0].abs().amax(),variance.sqrt(),mean)).cpu().tolist()
+            else:
+                height=maps[0][...,2].astype(np.float32)
+                crest=maps[0][...,3].astype(np.float32)
+                maximum,std,mean = float(np.max(np.abs(height))),float(np.std(crest)),float(np.mean(crest))
+            self.big_height=max(.001,1.5*maximum)
+            self.crest_gain=1/max(1e-8,2*std)
+            self.crest_bias=-mean*self.crest_gain
             self.statistics_parameters=parameters
         self.frame = frame
         self.mips_dirty = True
@@ -193,6 +244,17 @@ class Ocean_renderer:
         self.foam_state = state
         if state is None: return
         if previous is not None and previous.density is state.density: return
+        n = state.parameters.resolution
+        if self.foam_texture.size[0] != n:
+            self.foam_texture.destroy()
+            self.foam_texture = self._make_texture(n,n)
+            if self.gpu_transfer: self._initialize_textures([self.foam_texture])
+            self.foam_mips = self._make_mip_groups(self.foam_texture)
+            self._bind_textures()
+        if self.gpu_transfer:
+            self.gpu_transfer.upload_foam(state,self.foam_texture)
+            self.foam_dirty = True
+            return
         rgb = state.density.permute(1,2,0).cpu().numpy()
         data = np.zeros((*rgb.shape[:2],4),np.float16)
         data[...,:3] = np.minimum(rgb,60000)
@@ -203,12 +265,6 @@ class Ocean_renderer:
             self.foam_grain=np.clip(.5+grain*(.5/(.5**3/1.875)),0,1).astype(np.float16)
             self.foam_grain_basis=state.basis
         data[...,3] = self.foam_grain
-        n = data.shape[0]
-        if self.foam_texture.size[0] != n:
-            self.foam_texture.destroy()
-            self.foam_texture = self._make_texture(n,n)
-            self.foam_mips = self._make_mip_groups(self.foam_texture)
-            self._bind_textures()
         self._write_texture(self.foam_texture,data)
         self.foam_dirty = True
 
@@ -268,6 +324,7 @@ class Ocean_renderer:
         render_pass.set_index_buffer(self.indices,"uint32")
         render_pass.draw_indexed(self.index_count)
         render_pass.end()
+        if self.gpu_transfer: self.gpu_transfer.before_graphics()
         self.device.queue.submit([encoder.finish()])
 
     def render_image(self,width=1920,height=1080,camera=Camera(),look=Look(),left_renderer=None):

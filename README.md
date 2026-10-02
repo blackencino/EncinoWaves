@@ -19,8 +19,15 @@ bash tools/setup.sh
 .venv/bin/python -m encino_waves view
 ```
 
-The dependencies install from binary wheels; no C++, CUDA, Conan, or shader
-compiler is needed. On Linux, graphics need a working Vulkan driver and a
+The dependencies install from binary wheels. On macOS, the viewer automatically
+builds a small Metal bridge on first use, using Apple's Command Line Tools
+(`xcode-select --install` if missing). The build takes a few seconds and is cached;
+there is no Rust, CUDA toolkit or Conan build. This keeps wave and foam maps on
+the GPU through rendering. If the bridge is unavailable, a warning identifies
+the slower host-upload fallback. `ENCINO_WAVES_TRANSFER=metal` requires the native
+path; `ENCINO_WAVES_TRANSFER=host` selects the old path for comparison.
+
+On Linux, graphics need a working Vulkan driver and a
 desktop session. On Windows, create a Python virtual environment, run
 `python -m pip install -e '.[test]'`, then `python -m encino_waves view`.
 NVIDIA compute needs a CUDA-enabled PyTorch wheel and a compatible NVIDIA driver.
@@ -200,6 +207,7 @@ are not a keyframed recording of the parameter controls.
 .venv/bin/python -m encino_waves benchmark --resolution 4096 --frames 30
 .venv/bin/python tools/benchmark_editing.py --resolution 1024 --frames 30
 .venv/bin/python tools/benchmark_foam.py --resolution 4096 --frames 30
+.venv/bin/python tools/benchmark_transfer.py --frames 20  # Mac: host vs Metal
 .venv/bin/python tools/foam_preview.py
 ```
 
@@ -208,6 +216,8 @@ run the tests, then `benchmark --device cuda --resolution 4096`,
 `still renders/cuda.png --device cuda --resolution 2048`, and
 `view --device cuda`. CUDA hardware was not available during the Mac port;
 its conditional tests must pass on that machine before claiming hardware parity.
+The direct texture bridge currently supports Metal only; CUDA still uses the
+host display transfer while both wave synthesis and foam run on its GPU.
 
 [Implementation notes](docs/IMPLEMENTATION.md) document paper/source differences,
 random realizations, FFT normalization, renderer transfer cost and verification

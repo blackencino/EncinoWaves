@@ -25,7 +25,7 @@ encino-waves = "encino_waves.cli:main"
 where = ["python"]
 
 [tool.setuptools.package-data]
-encino_waves = ["shaders/*.wgsl"]
+encino_waves = ["shaders/*.wgsl", "native/*.mm", "native/*.metal"]
 
 [tool.pytest.ini_options]
 pythonpath = ["python"]

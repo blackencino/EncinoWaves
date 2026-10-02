@@ -520,6 +520,7 @@ class Viewer:
             changed,value=imgui.input_int("Seed",self.parameters.seed)
             if changed: self.edit_parameters(seed=value%2**32)
             imgui.text_wrapped(f"{self.device.adapter.info['device']} / {self.state.device}")
+            imgui.text(self.renderer.transfer_name)
             imgui.text_wrapped(self.renderer.sky_name)
             if self.frame_times: imgui.text(f"Frame work: {1000*np.median(self.frame_times):.1f} ms")
         if imgui.collapsing_header("Files & export"):
