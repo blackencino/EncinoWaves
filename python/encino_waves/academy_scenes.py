@@ -56,9 +56,9 @@ def academy_examples(resolution=PREVIEW_RESOLUTION):
             _camera(24.0, -12.0, -122.0), ACADEMY_LOOK,
         ),
         Scene(
-            "Calm deep seas", "4 knots wind, 35 km fetch, 1000 m depth, no swell",
+            "Calm deep seas", "4 knots wind, 300 km fetch, 1000 m depth, no swell",
             replace(base, wind_speed=4.0 * KNOTS_TO_METERS_PER_SECOND,
-                    fetch_km=35.0, depth=1000.0, swell=0.0),
+                    fetch_km=300.0, depth=1000.0, swell=0.0),
             _camera(22.0, -8.5, -147.0), ACADEMY_LOOK,
         ),
         Scene(

@@ -46,7 +46,10 @@ class _GuiContext:
 
     @property
     def pixel_ratio(self):
-        return self.context.physical_size[0] / WIDTH
+        width, height = self.context.physical_size
+        # Native window dimensions round independently, even with a 16:9
+        # constraint. Fit both axes so ImGui's scissor cannot exceed the target.
+        return min(width / WIDTH, height / HEIGHT)
 
 
 class _GuiCanvas:
@@ -471,8 +474,9 @@ class AcademyViewer(Viewer):
 
     def start_rehearsal(self):
         from .academy_timeline import Rehearsal
-        if self.rehearsal is not None or self.changed or self.future is not None:
+        if self.rehearsal is not None or self.changed or self.future is not None or self.movie_process is not None:
             return
+        held_keys = set(self._held_keys)
         # Build history ending at the configured simulation time. Neither this
         # work nor checkpoint compression belongs on the performance clock.
         self.foam_state = prepare_foam(self.state, self.time, self.foam_parameters,
@@ -485,6 +489,9 @@ class AcademyViewer(Viewer):
         initial = directory / "initial_scene.json"
         self.save_scene(initial)
         self._new_performance()
+        # Key repeats queued during pre-roll must not turn the starting R into
+        # an immediate cut. Release events will clear these normally afterward.
+        self._held_keys.update(held_keys)
         self.last_time = self._performance_origin
         self.message = ""
         self.rehearsal_path = directory / "rehearsal.json"
