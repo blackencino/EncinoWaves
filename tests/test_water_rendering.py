@@ -185,13 +185,13 @@ def test_haze_converges_to_one_color_at_nadir_in_a_directional_sky(renderer_fact
 
 @pytest.mark.parametrize("stretch,density,height,strength,threshold,unchanged",[
     (1.,0.,2.,1.,.75,True),       # Undeformed water cannot acquire white detail.
-    (.4,0.,2.,1.,.75,False),      # Resolved, active compression is the only cue.
+    (.4,0.,2.,1.,.75,False),      # Active compression is the only cue.
     (.4,100.,2.,1.,.75,True),     # Established opaque foam keeps its material.
-    (.4,0.,5000.,1.,.75,True),    # Unresolved detail must not whiten the horizon.
+    (.4,0.,5000.,1.,.75,False),   # Filtered fragments retain their average area.
     (.4,0.,2.,0.,.75,True),       # Hiding foam also hides its transient fringe.
     (.4,0.,2.,1.,.25,True),      # Follow the actual emitter's configured threshold.
 ])
-def test_optional_crumble_is_confined_to_resolved_uncovered_compression(
+def test_optional_crumble_is_confined_to_uncovered_compression(
         renderer_factory,stretch,density,height,strength,threshold,unchanged):
     renderer=renderer_factory(foam_density=(density,0.,0.))
     original=renderer.frame
@@ -216,6 +216,28 @@ def test_optional_crumble_is_confined_to_resolved_uncovered_compression(
     assert torch.equal(frame.displacement,before_displacement)
     assert torch.equal(frame.normal,before_normal)
     assert torch.equal(foam.density,before_foam)
+
+
+def test_paused_wave_and_source_edits_update_crest_without_resetting_foam(renderer_factory):
+    renderer=renderer_factory(foam_density=(0.,0.,0.))
+    frame,foam=renderer.frame,renderer.foam_state
+    look=replace(LOOK,foam=1.,crest_crumble=True)
+    camera=replace(CAMERA,height=5000.,pitch=-65.)  # Force the integrated map.
+    dry=renderer.render_image(112,80,camera,look)
+    displacement=frame.displacement.clone()
+    displacement[...,3]=-.4
+    renderer.upload(replace(frame,displacement=displacement))
+    renderer.upload_foam(foam)
+    breaking=renderer.render_image(112,80,camera,look)
+    assert np.count_nonzero(breaking!=dry)>20
+    # Same density identity: upload_foam intentionally avoids uploading history.
+    renderer.upload_foam(replace(foam,parameters=replace(foam.parameters,compression_threshold=.25)))
+    np.testing.assert_array_equal(renderer.render_image(112,80,camera,look),dry)
+    renderer.upload_foam(foam)
+    np.testing.assert_array_equal(renderer.render_image(112,80,camera,look),breaking)
+    renderer.upload_foam(replace(foam,parameters=replace(foam.parameters,emission_model="legacy")))
+    np.testing.assert_array_equal(renderer.render_image(112,80,camera,look),dry)
+    assert renderer.foam_state.density is foam.density
 
 
 @pytest.mark.parametrize("samples", [1, 4])

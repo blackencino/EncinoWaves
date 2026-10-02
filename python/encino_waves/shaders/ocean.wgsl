@@ -238,7 +238,8 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
     let roughness=clamp(sqrt(slope),.04,.8);
     let reflectance=environment_brdf(nv,roughness);
     let reflected=filtered_reflection(reflection,roughness);
-    let raw_density=max(textureSample(foam_texture,wave_sampler,in.uv).rgb,vec3f(0.0));
+    let raw_foam=textureSample(foam_texture,wave_sampler,in.uv);
+    let raw_density=max(raw_foam.rgb,vec3f(0.0));
     let density=raw_density*u.aeration.x*u.ocean.w;
     let shallow=1.0-exp(-density.g*u.aeration.y*2.0);
     let deep_air=1.0-exp(-density.b*u.aeration.y);
@@ -280,12 +281,13 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
     if u.aeration.x>.5 {
         let grain=textureSample(foam_texture,wave_sampler,in.uv*4.0).a;
         let close_material=foam_surface(raw_density,grain,u.ocean.w);
-        let filtered_material=textureSample(foam_material,wave_sampler,in.uv).rg;
+        let filtered_material=textureSample(foam_material,wave_sampler,in.uv);
         let size=vec2f(textureDimensions(foam_texture));
         let footprint=max(length(dpdx(in.uv)*size),length(dpdy(in.uv)*size));
         // Coverage is integrated BEFORE filtering. A distant whitecap keeps its
         // projected area instead of vanishing at a nonlinear threshold.
-        let material=mix(close_material,filtered_material,smoothstep(.6,1.5,footprint));
+        let filtered_weight=smoothstep(.6,1.5,footprint);
+        let material=mix(close_material,filtered_material.rg,filtered_weight);
         let coverage=clamp(material.x,0.0,1.0);
         let fresh=clamp(material.y/max(coverage,1e-6),0.0,1.0);
         // Foam is a diffuse scattering layer, illuminated by the whole sky.
@@ -299,34 +301,32 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
         let foam_albedo=mix(.72,.86,fresh)*detail.b;
         let foam_light=(1.0-foam_reflectance)*foam_albedo*sky_irradiance(foam_normal)
             +foam_reflectance*filtered_reflection(reflect(-view,foam_normal),foam_roughness);
+        let water_light=color;
+        color=mix(color,foam_light,coverage);
         if u.aeration.z>.5 {
-            // Optional, transient breaking material. Start just before the
-            // persistent emitter (.75), without changing that source/history.
+            // Transient tongues attached to current compression. Alpha stores
+            // their exclusive area after subtracting history at each subsample.
             let minimum_stretch=-textureSample(displacements,wave_sampler,in.uv).w;
-            let onset=min(1.0,u.aeration.w+min(.05,.5*u.optics.w));
-            let breaking=1.0-smoothstep(u.aeration.w-u.optics.w,onset,minimum_stretch);
-            let metres=in.uv*u.ocean.x;
-            let pixel_metres=max(length(dpdx(metres)),length(dpdy(metres)));
-            // Keep the existing centimetre-scale relief in world units. When
-            // unresolved, retire this small effect rather than drawing bands.
-            let resolved=1.0-smoothstep(.12,.65,pixel_metres);
-            let micro=vec4f(detail.xy*.9,detail.z,detail.w*.81);
-            var breaking_normal=foam_detail_normal(normal,micro,u.environment.w);
+            let close_crest=(1.0-close_material.x)*crest_surface(minimum_stretch,
+                raw_foam.a,grain,u.aeration.w,u.optics.w,u.ocean.w);
+            // Compression may become unresolved before RGB history does.
+            // Use the wave footprint, independently of the history resolution.
+            let crest_footprint=footprint*max(1.0,u.ocean.y/size.x);
+            let crest_filtered_weight=smoothstep(.6,1.5,crest_footprint);
+            let extra=clamp(mix(close_crest,filtered_material.a,crest_filtered_weight),0.0,1.0-coverage);
+            // Give newly breaking water its own fresh response: history has no
+            // meaningful age outside the deposited foam. Relief stays in cm.
+            var breaking_normal=foam_detail_normal(normal,detail,u.environment.w);
             if dot(breaking_normal,view)<0.0 { breaking_normal=reflect(breaking_normal,view); }
             breaking_normal=normalize(breaking_normal+view*1e-5);
-            let breaking_roughness=min(.9,pow(pow(roughness,4.0)+.5*foam_detail_variance(micro),.25));
+            let breaking_roughness=min(.9,pow(pow(.32,4.0)+.5*foam_detail_variance(detail),.25));
             let breaking_reflectance=environment_brdf(dot(breaking_normal,view),breaking_roughness);
-            let wet=breaking_reflectance*filtered_reflection(reflect(-view,breaking_normal),breaking_roughness)
-                +(1.0-breaking_reflectance)*body;
-            let edge_width=min(.02,fwidth(detail.b));
-            let fragments=smoothstep(1.018-edge_width,1.045+edge_width,detail.b);
-            let fringe=.12*fragments*resolved;
-            let crumbled=mix(wet,foam_light,fringe);
-            color=mix(color,crumbled,.75*breaking*resolved*clamp(u.ocean.w,0.0,1.0));
+            let crest_light=(1.0-breaking_reflectance)*.86*detail.b*sky_irradiance(breaking_normal)
+                +breaking_reflectance*filtered_reflection(reflect(-view,breaking_normal),breaking_roughness);
+            // water*(1-F-extra) + foam*F + crest*extra. Do not suppress the
+            // integrated exclusive area by (1-F) a second time.
+            color+=extra*(crest_light-water_light);
         }
-        // The approved foam material covers the transient layer, so its
-        // contribution is automatically multiplied by 1 - existing coverage.
-        color=mix(color,foam_light,coverage);
     } else if u.ocean.z<u.statistics.w {
         let crest=textureSample(displacements,wave_sampler,in.uv).w*u.statistics.y+u.statistics.z;
         let coverage=smoothstep(u.ocean.z,u.statistics.w,crest)*u.ocean.w;

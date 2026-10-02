@@ -41,9 +41,9 @@ def read_level(device, texture, level=0):
     return np.frombuffer(pixels, np.float16).reshape(height, stride//2)[:, :width*4].reshape(height, width, 4).astype(np.float32)
 
 
-def update(device, material, texture, strength=1.):
+def update(device, material, texture, strength=1., **kwargs):
     encoder = device.create_command_encoder()
-    result = material.update(encoder, texture, strength)
+    result = material.update(encoder, texture, strength, **kwargs)
     device.queue.submit([encoder.finish()])
     return result
 
@@ -166,3 +166,83 @@ def test_invalid_strength_is_rejected_before_encoding(device, strength):
     material = Foam_material(device)
     with pytest.raises(ValueError, match="strength"):
         material.update(None, None, strength)
+
+
+def test_crest_exclusive_area_preserves_history_channels_and_survives_mips(device):
+    y, x = np.mgrid[:32, :32]
+    data = np.zeros((32, 32, 4), np.float16)
+    data[..., 0] = ((x//8+y//8) % 2)*2
+    data[..., 1] = data[..., 0]*.25
+    data[..., 3] = .5
+    raw = raw_texture(device, data)
+    compressed = np.zeros_like(data)
+    compressed[..., 3] = -.4
+    crests = raw_texture(device, compressed)
+    material = Foam_material(device)
+    texture = update(device, material, raw)
+    original = [read_level(device, texture, level) for level in range(texture.mip_level_count)]
+    update(device, material, raw, crest_texture=crests)
+    base = read_level(device, texture)
+    assert .08 < base[..., 3].mean() < .5
+    for level, before in enumerate(original):
+        after = read_level(device, texture, level)
+        np.testing.assert_array_equal(after[..., :3], before[..., :3])
+        assert np.all(after[..., 3] >= 0)
+        assert np.all(after[..., 0]+after[..., 3] <= 1.001)
+        np.testing.assert_allclose(after[..., 3].mean(), base[..., 3].mean(), atol=6e-4, rtol=0)
+    # Where compressed water already has opaque foam, there is no second layer.
+    np.testing.assert_array_equal(base[..., 3][base[..., 0] == 1], 0)
+    update(device, material, raw)
+    np.testing.assert_array_equal(read_level(device, texture), original[0])
+
+
+def test_narrow_crests_are_not_skipped_by_a_coarse_foam_grid(device):
+    raw = raw_texture(device, np.full((16, 16, 4), (0., 0., 0., .5), np.float16))
+    data = np.zeros((128, 128, 4), np.float16)
+    crests = raw_texture(device, data)
+    material = Foam_material(device)
+    data[..., 3] = -.4
+    write_raw(device, crests, data)
+    texture = update(device, material, raw, crest_texture=crests)
+    full_area = read_level(device, texture)[..., 3].mean()
+    assert full_area > .2
+    areas = []
+    # Move a one-wave-texel crest across all eight phases of a history texel.
+    # Fixed 4x4 quadrature misses every other phase completely.
+    for column in range(8):
+        data[..., 3] = -1
+        data[:, column, 3] = -.4
+        write_raw(device, crests, data)
+        texture = update(device, material, raw, crest_texture=crests)
+        areas.append(read_level(device, texture)[..., 3].mean())
+    np.testing.assert_allclose(areas, np.full(8, full_area/128), atol=1e-5, rtol=0)
+
+
+def test_crest_binding_updates_without_new_history_and_reuses_steady_resources(device):
+    data = np.full((16, 16, 4), (0., 0., 0., .5), np.float16)
+    raw = raw_texture(device, data)
+    data[..., 3] = -.4
+    crests = raw_texture(device, data)
+    material = Foam_material(device)
+    texture = update(device, material, raw, crest_texture=crests)
+    assert read_level(device, texture)[..., 3].mean() > .2
+    data[..., 3] = -1
+    write_raw(device, crests, data)
+    with patch.object(device, "create_texture", side_effect=AssertionError("Texture allocation")), \
+         patch.object(device, "create_bind_group", side_effect=AssertionError("Bind group allocation")), \
+         patch.object(device.queue, "read_texture", side_effect=AssertionError("Texture readback")), \
+         patch.object(device.queue, "read_buffer", side_effect=AssertionError("Buffer readback")):
+        assert update(device, material, raw, crest_texture=crests) is texture
+    np.testing.assert_array_equal(read_level(device, texture)[..., 3], 0)
+    # Resolution changes replace the wave texture, without changing RGB history.
+    replacement = raw_texture(device, np.full((32, 32, 4), (0., 0., 0., -.4), np.float16))
+    assert update(device, material, raw, crest_texture=replacement) is texture
+    assert read_level(device, texture)[..., 3].mean() > .2
+
+
+@pytest.mark.parametrize("grain", [0., .5, 1.])
+def test_extreme_grain_cannot_create_crest_on_uncompressed_water(device, grain):
+    raw = raw_texture(device, np.full((16, 16, 4), (0., 0., 0., grain), np.float16))
+    crests = raw_texture(device, np.full((32, 32, 4), (0., 0., 0., -1.), np.float16))
+    texture = update(device, Foam_material(device), raw, crest_texture=crests)
+    np.testing.assert_array_equal(read_level(device, texture), 0)

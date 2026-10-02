@@ -3,12 +3,13 @@
 
 Prepend ``FOAM_SURFACE_WGSL`` to the ocean shader to use the same
 ``foam_surface(density, grain, strength) -> vec2(coverage, coverage*freshness)``
-for close fragments. The output texture also stores coverage*grain in B.
+for close fragments. B stores coverage*grain; A stores optional crest area
+outside that history coverage, integrated before filtering.
 
 ``update`` always encodes a new base pass and its linear mips: a texture object
 can retain its identity while its contents change. The caller owns dirtiness,
-including changes to strength while paused. Bind groups, views and allocations
-are reused until the raw texture or its dimensions change. The caller submits
+including wave/source changes while paused. Bind groups, views and allocations
+are reused until an input texture or its dimensions change. The caller submits
 the supplied encoder and must rebind the returned texture after a size change.
 One material instance represents one currently displayed foam history.
 """
@@ -53,10 +54,11 @@ class Foam_material:
             usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
         self.texture = None
         self._raw_texture = None
+        self._crest_texture = None
         self._base_group = None
         self._base_view = None
         self._mips = []
-        self._strength = None
+        self._settings = None
 
     def _allocate(self, width, height):
         if self.texture is not None:
@@ -87,34 +89,45 @@ class Foam_material:
         render_pass.draw(3)
         render_pass.end()
 
-    def update(self, encoder, raw_texture, strength=1.0):
+    def update(self, encoder, raw_texture, strength=1.0, *, crest_texture=None,
+               crest_threshold=.75, crest_width=.15):
         """Encode coverage and all its mips, returning this instance's texture.
 
         Raw RGB must contain finite aeration density; alpha supplies periodic
         grain. A 1x1 zero raw texture naturally produces disabled coverage.
+        Optional wave displacement alpha is negative minimum horizontal stretch.
         No texture readback, queue submission, or synchronization occurs here.
         """
         strength = float(strength)
         if not math.isfinite(strength) or not 0 <= strength <= 3.4028234663852886e38:
             raise ValueError("Foam strength must be finite, nonnegative and fit float32")
+        if not math.isfinite(crest_threshold) or not 0 <= crest_threshold <= 1:
+            raise ValueError("Crest threshold must be in [0, 1]")
+        if not math.isfinite(crest_width) or not 0 < crest_width <= 1:
+            raise ValueError("Crest width must be in (0, 1]")
         width, height, layers = raw_texture.size
         if raw_texture.format != "rgba16float" or layers != 1:
             raise ValueError("Foam material requires a single RGBA16F texture")
         if width & (width-1) or height & (height-1):
             raise ValueError("Foam material dimensions must be powers of two, including 1")
+        settings = (strength, crest_threshold, crest_width, float(crest_texture is not None))
+        crest_input = crest_texture if crest_texture is not None else raw_texture
         if self.texture is None or self.texture.size[:2] != (width, height):
             self._allocate(width, height)
-        if self._raw_texture is not raw_texture:
+        if self._raw_texture is not raw_texture or self._crest_texture is not crest_input:
             self._raw_texture = raw_texture
+            self._crest_texture = crest_input
             self._base_group = self.device.create_bind_group(
                 layout=self.base_pipeline.get_bind_group_layout(0), entries=[
                     {"binding": 0, "resource": raw_texture.create_view(
                         base_mip_level=0, mip_level_count=1)},
                     {"binding": 1, "resource": self.sampler},
-                    {"binding": 2, "resource": {"buffer": self.uniform}}])
-        if self._strength != strength:
-            self.device.queue.write_buffer(self.uniform, 0, struct.pack("<4f", strength, 0, 0, 0))
-            self._strength = strength
+                    {"binding": 2, "resource": {"buffer": self.uniform}},
+                    {"binding": 3, "resource": crest_input.create_view(
+                        base_mip_level=0, mip_level_count=1)}])
+        if self._settings != settings:
+            self.device.queue.write_buffer(self.uniform, 0, struct.pack("<4f", *settings))
+            self._settings = settings
         self._draw(encoder, self.base_pipeline, self._base_group, self._base_view)
         for group, target in self._mips:
             self._draw(encoder, self.mip_pipeline, group, target)
@@ -127,6 +140,7 @@ class Foam_material:
             self.texture = None
         self.uniform.destroy()
         self._raw_texture = None
+        self._crest_texture = None
         self._base_group = None
         self._base_view = None
         self._mips = []

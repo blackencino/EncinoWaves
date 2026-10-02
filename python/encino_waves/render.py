@@ -140,7 +140,8 @@ class Ocean_renderer:
         self.foam_dirty = False
         self.foam_material = Foam_material(device)
         self.foam_material_texture = None
-        self.foam_material_strength = None
+        self.foam_material_settings = None
+        self.foam_material_crest_dirty = True
         self.foam_material_dirty = True
         self.foam_detail = Foam_detail(device)
         self.foam_grain_basis = None
@@ -296,6 +297,7 @@ class Ocean_renderer:
             self.statistics_parameters=parameters
         self.frame = frame
         self.mips_dirty = True
+        self.foam_material_crest_dirty = True
 
     def _bind_textures(self):
         if not self.wave_textures: return
@@ -432,12 +434,19 @@ class Ocean_renderer:
             self.mips_dirty = False
         if self.foam_dirty:
             self._mipmaps(encoder,self.foam_mips)
-        if physical and (self.foam_material_dirty or self.foam_material_strength != look.foam):
-            material_texture = self.foam_material.update(encoder,self.foam_texture,look.foam)
+        crest_threshold = foam_parameters.compression_threshold if foam_parameters else .75
+        crest_width = foam_parameters.compression_width if foam_parameters else .15
+        material_settings = (look.foam,crest_crumble,crest_threshold,crest_width)
+        if physical and (self.foam_material_dirty or self.foam_material_settings != material_settings
+                         or (crest_crumble and self.foam_material_crest_dirty)):
+            material_texture = self.foam_material.update(encoder,self.foam_texture,look.foam,
+                crest_texture=self.wave_textures[0] if crest_crumble else None,
+                crest_threshold=crest_threshold,crest_width=crest_width)
             if material_texture is not self.foam_material_texture:
                 self.foam_material_texture = material_texture
                 self._bind_textures()
-            self.foam_material_strength = look.foam
+            self.foam_material_settings = material_settings
+            self.foam_material_crest_dirty = False
             self.foam_material_dirty = False
         if self.foam_dirty:
             self.foam_dirty = False
