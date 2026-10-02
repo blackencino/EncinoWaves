@@ -39,12 +39,13 @@ class Shot:
     foam_preroll: float = 6.0
 
 
-def academy_shots(resolution=2048):
+def academy_shots(resolution=4096,foam_resolution=1024):
     p=Wave_parameters(resolution=resolution)
+    foam=Foam_parameters(resolution=foam_resolution)
     horizon=presentation_views(p.domain)[1]
     # 300 seconds exactly; each cut is an actual fixed physical state.
     # Identical geometry, shading, seed and scale within each comparison.
-    return (
+    shots=(
         Shot(20,"Encino Waves","Christopher J. Horvath | Ocean waves shaped by real conditions",p,
              camera=horizon.camera,look=horizon.look),
         Shot(25,"The starting point","Earlier model / Encino Waves",p,True),
@@ -65,6 +66,7 @@ def academy_shots(resolution=2048):
         Shot(20,"Encino Waves","Empirical directional wave spectra for computer graphics | 2015",replace(p,swell=.6),
              camera=horizon.camera,look=horizon.look),
     )
+    return tuple(replace(shot,foam=foam) for shot in shots)
 
 
 @lru_cache(maxsize=12)
@@ -134,13 +136,17 @@ def render_shots(shots,output,*,sky=None,device="auto",width=1920,height=1080,fp
                  captions=True,codec="h264",overwrite=False,max_mbps=None,progress=print):
     if width%2 or height%2: raise ValueError("Movie dimensions must be even")
     graphics=make_device()
-    renderer=Ocean_renderer(graphics,sky,mesh_resolution=(960,576))
+    # Retain the same geometry density in screen space for a UHD master.
+    mesh_scale=max(1.0,width/1920,height/1080)
+    mesh_resolution=(round(960*mesh_scale),round(576*mesh_scale))
+    renderer=Ocean_renderer(graphics,sky,mesh_resolution=mesh_resolution)
     comparison_renderer=None
     target=graphics.create_texture(size=(width,height,1),format=renderer.format,
         usage=wgpu.TextureUsage.RENDER_ATTACHMENT|wgpu.TextureUsage.COPY_SRC)
     writer=Movie_writer(output,width,height,fps,codec,overwrite,max_mbps)
     manifest={"fps":fps,"width":width,"height":height,"sky":str(sky) if sky else renderer.sky_name,
-              "graphics":dict(graphics.adapter.info),"shots":[],"frames":0,"max_mbps":max_mbps}
+              "graphics":dict(graphics.adapter.info),"shots":[],"frames":0,"max_mbps":max_mbps,
+              "mesh_resolution":mesh_resolution,"antialiasing_samples":renderer.sample_count,"codec":codec}
     start=time.perf_counter()
     complete=False
     try:
@@ -153,7 +159,7 @@ def render_shots(shots,output,*,sky=None,device="auto",width=1920,height=1080,fp
                 state=make_initial_state(shot.parameters,device)
                 other=make_initial_state(shot.parameters.tessendorf(),device) if shot.comparison else None
             if other and comparison_renderer is None:
-                comparison_renderer=Ocean_renderer(graphics,sky,mesh_resolution=(960,576))
+                comparison_renderer=Ocean_renderer(graphics,sky,mesh_resolution=mesh_resolution)
             camera=shot.camera or frame_domain(shot.parameters.domain)
             look=shot.look
             foam=prepare_foam(state,shot.start_time,shot.foam,shot.foam_state,shot.foam_preroll)

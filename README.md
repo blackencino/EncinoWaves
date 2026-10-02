@@ -177,17 +177,23 @@ of playback speed. Movie exports run in a separate process; progress is in
 .venv/bin/python -m encino_waves render renders/shot.mp4 --scene renders/your_scene.json --seconds 15 --resolution 2048
 .venv/bin/python -m encino_waves render renders/comparison.mp4 --compare --seconds 10
 .venv/bin/python -m encino_waves demo renders/review.mp4 --preview
-.venv/bin/python -m encino_waves demo renders/academy.mp4 --resolution 2048
+.venv/bin/python -m encino_waves demo renders/academy.mp4 --resolution 4096 --foam-resolution 1024 --width 3840 --height 2160
 ```
 
 `demo` is exactly five minutes at 24 fps: wind, fetch, directional spreading,
 swell, depth and contrasting conditions, with two matched comparisons.
+Academy exports default to **4096² waves and 1024² foam**; `--resolution 2048`
+is also suitable for a lighter export. Image dimensions are independent: the
+command above writes a 3840×2160 movie. The interactive viewer retains its
+existing defaults.
 [The narration draft](docs/VIDEO_SCRIPT.txt) follows that sequence. The generated
 movie has captions but no recorded narration or music. `--preview` makes a
 34-second review with two seconds per shot.
 
 Use `--sky`, `--width`, `--height`, `--fps`, `--time` (single shots),
 `--no-captions`, or `--codec prores` as needed. ProRes should use a `.mov` output.
+`--foam-resolution` also works for stills and saved-scene movies; changing a
+checkpoint's foam resolution rebuilds its history with the requested preroll.
 `--max-mbps 8` creates a compact H.264 review copy; omit it for the quality default
 (CRF 16). Full-quality ocean movies need several GB of free space. Existing
 outputs require `--overwrite`. Failed exports discard their temporary movie and

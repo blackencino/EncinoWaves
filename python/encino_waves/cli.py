@@ -31,6 +31,8 @@ def parser():
         p.add_argument("--height",type=int,default=1080)
         p.add_argument("--overwrite",action="store_true")
         p.add_argument("--foam",action=argparse.BooleanOptionalAction,default=None,help="Persistent RGB foam; --no-foam restores crest shading")
+        p.add_argument("--foam-resolution",type=int,choices=(16,32,64,128,256,512,1024,2048),
+                       help="Foam grid size; defaults to 1024 for demo, otherwise the saved scene or 512")
         p.add_argument("--foam-preroll",type=float,default=6.0,help="Seconds of foam buildup when no saved history is available (0-60)")
     for p in (view,still,render):
         p.add_argument("--scene",type=Path,help="JSON saved by the viewer")
@@ -56,7 +58,7 @@ def main(argv=None):
     if args.command is None:
         args=parser().parse_args(["view"])
     requested_resolution=getattr(args,"resolution",None)
-    if args.command!="doctor": args.resolution=requested_resolution or 1024
+    if args.command!="doctor": args.resolution=requested_resolution or (4096 if args.command=="demo" else 1024)
     if args.command=="doctor":
         import torch,wgpu
         result={"torch":torch.__version__,"metal":torch.backends.mps.is_available(),"cuda":torch.cuda.is_available(),
@@ -91,7 +93,7 @@ def main(argv=None):
     from .foam import Foam_parameters, prepare_foam
     if args.width<16 or args.height<16: raise ValueError("Image dimensions must be at least 16")
     if args.command=="demo":
-        shots=academy_shots(args.resolution)
+        shots=academy_shots(args.resolution,foam_resolution=args.foam_resolution or 1024)
         shots=tuple(replace(shot,foam=replace(shot.foam,enabled=args.foam if args.foam is not None else True),foam_preroll=args.foam_preroll) for shot in shots)
         if args.preview: shots=tuple(replace(shot,duration=2) for shot in shots)
     else:
@@ -121,6 +123,7 @@ def main(argv=None):
             if saved.get("comparison_shading_statistics"): comparison_shading=Shading_statistics(**saved["comparison_shading_statistics"])
         if args.time is not None: start_time=args.time
         if args.foam is not None: foam=replace(foam,enabled=args.foam)
+        if args.foam_resolution is not None: foam=replace(foam,resolution=args.foam_resolution)
         if args.tessendorf: p=p.tessendorf()
         if args.command=="still":
             if args.output.exists() and not args.overwrite: raise FileExistsError(args.output)
