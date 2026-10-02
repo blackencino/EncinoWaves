@@ -1,4 +1,4 @@
-"""Capture three ocean compositions using the existing Maya camera and waves.
+"""Capture ocean compositions using the existing Maya camera and waves.
 
 Run GPU captures serially with other renderer work. ``--describe`` lists the
 camera and lighting settings without creating a device or evaluating waves.
@@ -19,7 +19,7 @@ from encino_waves.render import Ocean_renderer, make_device
 
 
 def compositions(domain=512.0, exposure_offset=0.0):
-    names=("overview", "storm_horizon", "crosslight_crests")
+    names=("overview", "storm_horizon", "crosslight_crests", "sunset")
     return {name:(view.camera,replace(view.look,exposure=view.look.exposure+exposure_offset))
             for name,view in zip(names,presentation_views(domain))}
 

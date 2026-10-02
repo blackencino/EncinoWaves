@@ -592,9 +592,30 @@ dolly preserve the pivot; track moves eye and pivot together. The original
 framing and the F key use the original `ViewScene::getBounds` / `GLCamera::frame`
 rule, so the initial camera is well above the surface. No bare left-drag fly camera.
 
-The large-domain storm shot in the movie uses a separately staged camera at the
-default 512 m patch framing distance. Applying the 1800 m domain's full framing
-distance made the original fog obscure the shot.
+Presentation compositions stage large patches within the default 512 m framing
+distance, independently of simulation extent. Sunset preserves the supplied Maya
+fields: height 92.5 m, pitch −15.4°, heading −487.6°, with the center of interest
+on the sea at the origin. Camera interpolation follows the shorter heading arc,
+interpolates the pivot and orbit distance, and preserves exact endpoint views.
+
+### Continuous Academy presentation
+
+`presentation.py` describes a 300-second sequence of immutable target values.
+Each cue changes exactly one of wind speed, fetch, swell, depth, camera, or
+comparison opacity. Quintic easing has zero speed and acceleration at its
+endpoints; fetch and depth interpolate in log space. Domain (1,000 m), seed,
+spreading model, sky, exposure and foam parameters stay fixed. The camera moves
+during physical holds, so each ocean edit is visible from a fixed viewpoint.
+The 60-second preview follows the same targets with shorter cue durations.
+
+The exporter builds one wave basis, evaluates edits through the existing spectral
+pipeline, and retains accumulated propagation phase when depth changes. Main
+foam is prepared once and carried throughout. This is continuous retuning of
+the prescribed sea state, not a fluid simulation of changing weather. The
+Tessendorf comparison uses the same basis, camera, light and phase, with its own
+foam history; it fades onto the left half at full-frame projection without a cut.
+The manifest records the initial state, cue targets, active controls and timing.
+Single-scene still/movie exports remain available independently.
 
 ## Persistent foam and aeration
 

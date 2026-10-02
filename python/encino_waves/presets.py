@@ -53,6 +53,13 @@ def presentation_views(domain=512.0):
     """Camera/light compositions only; none change the ocean parameters."""
     scale=min(domain,512.0)/512.0
     heading=math.radians(-165)
+    # The supplied Maya camera fields are height, pitch, and heading. Keep the
+    # unwrapped heading and put its center of interest on the ocean at origin.
+    sunset=Camera(height=92.5,yaw=-487.6,pitch=-15.4)
+    distance=-sunset.height/math.sin(math.radians(sunset.pitch))
+    forward=sunset.basis()[0]
+    sunset=replace(sunset,x=-distance*float(forward[0]),y=-distance*float(forward[1]),
+                   center_of_interest=distance)
     return (
         Presentation_view("Overview",frame_domain(min(domain,512.0)),Look()),
         Presentation_view("Storm horizon",look_at((425*scale,-425*scale,95*scale),fov=48),
@@ -60,4 +67,5 @@ def presentation_views(domain=512.0):
         Presentation_view("Across the crests",
             look_at((-430*math.sin(heading)*scale,-430*math.cos(heading)*scale,75*scale),fov=44),
             Look(exposure=.45,sky_rotation=45,haze=.85)),
+        Presentation_view("Sunset",sunset,Look()),
     )

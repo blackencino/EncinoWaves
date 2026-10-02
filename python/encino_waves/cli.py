@@ -15,7 +15,7 @@ def parser():
     view=sub.add_parser("view",help="Open the native viewer")
     still=sub.add_parser("still",help="Render a PNG offscreen")
     render=sub.add_parser("render",help="Render a deterministic movie")
-    demo=sub.add_parser("demo",help="Render the five-minute Academy sequence")
+    demo=sub.add_parser("demo",help="Render the continuous five-minute Academy presentation")
     bench=sub.add_parser("benchmark",help="Measure synchronized GPU compute and transfer separately")
     doctor=sub.add_parser("doctor",help="Report compute and graphics device support")
     for p in (view,still,render,demo,bench):
@@ -47,7 +47,7 @@ def parser():
         p.add_argument("--codec",choices=("h264","prores"),default="h264")
         p.add_argument("--max-mbps",type=float,help="Optional H.264 bitrate ceiling for compact review copies")
         p.add_argument("--no-captions",action="store_true")
-    demo.add_argument("--preview",action="store_true",help="Two seconds per shot, for review")
+    demo.add_argument("--preview",action="store_true",help="Render a continuous one-minute timing/layout preview")
     bench.add_argument("--frames",type=int,default=30)
     bench.add_argument("--output",type=Path)
     return root
@@ -89,13 +89,14 @@ def main(argv=None):
         Viewer(args.resolution,args.device,args.sky,args.preset-1,scene=args.scene).run(); return
     from .presets import scene_with_resolution
     from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
-    from .export import Shot,render_shots,academy_shots
+    from .export import Shot,render_shots,render_presentation
     from .foam import Foam_parameters, prepare_foam
     if args.width<16 or args.height<16: raise ValueError("Image dimensions must be at least 16")
     if args.command=="demo":
-        shots=academy_shots(args.resolution,foam_resolution=args.foam_resolution or 1024)
-        shots=tuple(replace(shot,foam=replace(shot.foam,enabled=args.foam if args.foam is not None else True),foam_preroll=args.foam_preroll) for shot in shots)
-        if args.preview: shots=tuple(replace(shot,duration=2) for shot in shots)
+        from .presentation import academy_presentation
+        presentation=academy_presentation(args.resolution,foam_resolution=args.foam_resolution or 1024,preview=args.preview)
+        presentation=replace(presentation,foam=replace(presentation.foam,
+            enabled=args.foam if args.foam is not None else True),foam_preroll=args.foam_preroll)
     else:
         scene=scene_with_resolution(args.preset-1,args.resolution)
         p,camera,look=scene.parameters,scene.camera,scene.look
@@ -152,6 +153,8 @@ def main(argv=None):
     if args.fps<1 or args.fps>120: raise ValueError("fps must be between 1 and 120")
     if args.max_mbps is not None and (not math.isfinite(args.max_mbps) or args.max_mbps<=0):
         raise ValueError("max-mbps must be finite and positive")
-    result=render_shots(shots,args.output,sky=args.sky,device=args.device,width=args.width,height=args.height,
-                       fps=args.fps,captions=not args.no_captions,codec=args.codec,overwrite=args.overwrite,max_mbps=args.max_mbps)
+    render=render_presentation if args.command=="demo" else render_shots
+    result=render(presentation if args.command=="demo" else shots,args.output,sky=args.sky,device=args.device,
+                  width=args.width,height=args.height,fps=args.fps,captions=not args.no_captions,
+                  codec=args.codec,overwrite=args.overwrite,max_mbps=args.max_mbps)
     print(f"Wrote {args.output}: {result['duration_seconds']:.2f} s, {result['frames']} frames")

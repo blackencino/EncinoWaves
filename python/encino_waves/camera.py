@@ -72,3 +72,18 @@ def frame_domain(domain,fov=45.0):
     radius=.5*math.sqrt(3)*.25*domain
     g=1.1*radius/math.sin(math.radians(fov)/2)
     return look_at((g,-g,2*radius),fov=fov)
+
+
+def interpolate_camera(start,end,amount):
+    """Interpolate Maya orbit, pivot and distance, taking the shorter yaw arc."""
+    if amount<=0 or start==end: return start
+    if amount>=1: return end
+    yaw_delta=(end.yaw-start.yaw+180)%360-180
+    distance=math.exp((1-amount)*math.log(start.center_of_interest)
+                      +amount*math.log(end.center_of_interest))
+    result=replace(start,yaw=start.yaw+amount*yaw_delta,
+        pitch=(1-amount)*start.pitch+amount*end.pitch,
+        fov=(1-amount)*start.fov+amount*end.fov,center_of_interest=distance)
+    pivot=(1-amount)*start.pivot+amount*end.pivot
+    eye=pivot-distance*result.basis()[0]
+    return replace(result,x=float(eye[0]),y=float(eye[1]),height=float(eye[2]))

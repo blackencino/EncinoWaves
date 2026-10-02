@@ -146,7 +146,8 @@ discovery prefers a pack's `_Ref` panorama over its small `_Env` lighting map.
 The pack remains in the ignored `assets/local/` directory for this checkout.
 
 **Camera & light → Compose view** offers the raised overview, a storm horizon,
-and a view across the crests. These change only camera and lighting. The starting
+a view across the crests, and **Sunset** (height 92.5 m, pitch −15.4°, heading
+−487.6°). These change only camera and lighting. The starting
 camera still uses the original Maya framing rule, well above the surface.
 
 The default **Presentation** material uses bounded dielectric reflection,
@@ -176,19 +177,29 @@ of playback speed. Movie exports run in a separate process; progress is in
 .venv/bin/python -m encino_waves still renders/ocean.png --resolution 4096
 .venv/bin/python -m encino_waves render renders/shot.mp4 --scene renders/your_scene.json --seconds 15 --resolution 2048
 .venv/bin/python -m encino_waves render renders/comparison.mp4 --compare --seconds 10
-.venv/bin/python -m encino_waves demo renders/review.mp4 --preview
-.venv/bin/python -m encino_waves demo renders/academy.mp4 --resolution 4096 --foam-resolution 1024 --width 3840 --height 2160
+PYTHONPATH=python .venv/bin/python -m encino_waves demo renders/review.mp4 --preview --resolution 2048 --width 1920 --height 1080
+PYTHONPATH=python .venv/bin/python -m encino_waves demo renders/academy.mp4 --resolution 4096 --foam-resolution 1024 --width 3840 --height 2160
 ```
 
-`demo` is exactly five minutes at 24 fps: wind, fetch, directional spreading,
-swell, depth and contrasting conditions, with two matched comparisons.
+`demo` is exactly five minutes at 24 fps, with no cuts or reseeds. It starts in
+1,000 m deep water and keeps a **1 km patch** throughout. Only one physical
+control changes at a time; the Maya camera moves smoothly during separate holds.
+Wave phases and foam history continue through every change. A matched earlier-model
+comparison fades onto the left half without changing the camera projection.
+
+At the same strong wind speed, short fetch and low swell give **Chaos**; long
+fetch and high swell give **Lawful evil**. Reducing swell, then depth to 1.5 m,
+reveals shallow chop. The film visits all four compositions, including Sunset,
+while lighting remains fixed. These are smooth edits of the spectral conditions,
+not a simulation of the time a real sea takes to respond to changing weather.
 Academy exports default to **4096² waves and 1024² foam**; `--resolution 2048`
 is also suitable for a lighter export. Image dimensions are independent: the
 command above writes a 3840×2160 movie. The interactive viewer retains its
 existing defaults.
 [The narration draft](docs/VIDEO_SCRIPT.txt) follows that sequence. The generated
-movie has captions but no recorded narration or music. `--preview` makes a
-34-second review with two seconds per shot.
+movie has captions but no recorded narration or music. `--preview` compresses
+the same camera/control timeline to **60 seconds**, with waves still moving at
+real time. Its faster edits are intended for reviewing composition and sequence.
 
 Use `--sky`, `--width`, `--height`, `--fps`, `--time` (single shots),
 `--no-captions`, or `--codec prores` as needed. ProRes should use a `.mov` output.

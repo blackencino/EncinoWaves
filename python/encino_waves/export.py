@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from functools import lru_cache
 import json
+import math
 import subprocess
 import time
 import uuid
@@ -12,11 +13,11 @@ from PIL import Image, ImageDraw, ImageFont
 import imageio_ffmpeg
 import wgpu
 from .model import Wave_parameters, Phase_step, make_initial_state, evaluate
-from .editing import make_edited_state
+from .editing import make_edited_state, make_wave_basis, state_from_basis, edit_state
 from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics, read_rgba
 from .camera import frame_domain
-from .presets import presentation_views
 from .foam import Foam_parameters, prepare_foam, advance_foam_to
+from .presentation import sample_presentation, changed_control
 
 
 @dataclass(frozen=True)
@@ -39,36 +40,6 @@ class Shot:
     foam_preroll: float = 6.0
 
 
-def academy_shots(resolution=4096,foam_resolution=1024):
-    p=Wave_parameters(resolution=resolution)
-    foam=Foam_parameters(resolution=foam_resolution)
-    horizon=presentation_views(p.domain)[1]
-    # 300 seconds exactly; each cut is an actual fixed physical state.
-    # Identical geometry, shading, seed and scale within each comparison.
-    shots=(
-        Shot(20,"Encino Waves","Christopher J. Horvath | Ocean waves shaped by real conditions",p,
-             camera=horizon.camera,look=horizon.look),
-        Shot(25,"The starting point","Earlier model / Encino Waves",p,True),
-        Shot(15,"Wind speed","5 m/s",replace(p,wind_speed=5,fetch_km=50)),
-        Shot(15,"Wind speed","17 m/s",p),
-        Shot(15,"Wind speed","30 m/s",replace(p,wind_speed=30)),
-        Shot(15,"Fetch","20 km | A short distance for the wind to build waves",replace(p,fetch_km=20)),
-        Shot(15,"Fetch","300 km",p),
-        Shot(15,"Fetch","1,250 km | More distance for waves to develop",replace(p,fetch_km=1250)),
-        Shot(20,"Wave directions","Different sizes of waves travel in different directions",replace(p,spreading="hasselmann"),True),
-        Shot(20,"Local wind","Swell 0 | An irregular sea",replace(p,swell=0)),
-        Shot(20,"Distant weather","Swell 1 | Long, parallel wave trains",replace(p,swell=1)),
-        Shot(15,"Ocean depth","150 metres",replace(p,depth=150)),
-        Shot(15,"Ocean depth","5 metres | Shallow water changes the mix of waves",replace(p,depth=5)),
-        Shot(20,"A range of conditions","Light wind | 3 m/s, 8 km fetch",replace(p,domain=160,wind_speed=3,fetch_km=8,depth=30)),
-        Shot(20,"A range of conditions","Storm | 35 m/s, 1,250 km fetch",replace(p,domain=1800,wind_speed=35,fetch_km=1250,depth=150),camera=frame_domain(512)),
-        Shot(15,"Physical controls","Wind speed. Fetch. Directional spreading. Swell. Depth.",p),
-        Shot(20,"Encino Waves","Empirical directional wave spectra for computer graphics | 2015",replace(p,swell=.6),
-             camera=horizon.camera,look=horizon.look),
-    )
-    return tuple(replace(shot,foam=foam) for shot in shots)
-
-
 @lru_cache(maxsize=12)
 def _font(size):
     for path in ("/System/Library/Fonts/Supplemental/Avenir Next.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -77,25 +48,37 @@ def _font(size):
     return ImageFont.load_default(size=size)
 
 
-def caption_image(rgba,title,caption,parameters,comparison=False):
+def _physical_caption(parameters):
+    def number(value,places):
+        value=round(value,places)
+        if value==0: return "0"
+        return f"{value:.{places}f}".rstrip("0").rstrip(".") if places else f"{value:.0f}"
+    return (f"Wind {number(parameters.wind_speed,1)} m/s   Fetch {number(parameters.fetch_km,0)} km   "
+            f"Depth {number(parameters.depth,1 if parameters.depth<10 else 0)} m   Swell {number(parameters.swell,2)}")
+
+
+def caption_image(rgba,title,caption,parameters,comparison=False,*,opacity=1.0,rounded_controls=False):
     image=Image.fromarray(rgba).convert("RGBA")
     w,h=image.size
     scale=h/1080
     overlay=Image.new("RGBA",image.size)
     draw=ImageDraw.Draw(overlay)
+    opacity=max(0.,min(1.,float(opacity)))
+    comparison=max(0.,min(1.,float(comparison)))
     # A small production-style lower third; never covers the central wave field.
     for y in range(int(h*.73),h):
-        alpha=int(185*max(0.0,(y-h*.73)/(h*.27))**1.2)
+        alpha=int(185*opacity*max(0.0,(y-h*.73)/(h*.27))**1.2)
         draw.line((0,y,w,y),fill=(5,12,16,alpha))
     margin=int(55*scale)
-    draw.text((margin,h-int(142*scale)),title,font=_font(int(40*scale)),fill=(240,242,237,255))
-    draw.text((margin,h-int(85*scale)),caption,font=_font(int(23*scale)),fill=(210,223,222,255))
-    settings=f"Wind {parameters.wind_speed:g} m/s   Fetch {parameters.fetch_km:g} km   Depth {parameters.depth:g} m   Swell {parameters.swell:g}"
-    draw.text((margin,margin),settings,font=_font(int(20*scale)),fill=(231,235,233,255),stroke_width=1,stroke_fill=(0,0,0,110))
+    draw.text((margin,h-int(142*scale)),title,font=_font(max(1,int(40*scale))),fill=(240,242,237,int(255*opacity)))
+    draw.text((margin,h-int(85*scale)),caption,font=_font(max(1,int(23*scale))),fill=(210,223,222,int(255*opacity)))
+    settings=(_physical_caption(parameters) if rounded_controls else
+              f"Wind {parameters.wind_speed:g} m/s   Fetch {parameters.fetch_km:g} km   Depth {parameters.depth:g} m   Swell {parameters.swell:g}")
+    draw.text((margin,margin),settings,font=_font(max(1,int(20*scale))),fill=(231,235,233,255),stroke_width=1,stroke_fill=(0,0,0,110))
     if comparison:
-        draw.line((w//2,0,w//2,h),fill=(205,218,218,140),width=max(1,int(2*scale)))
+        draw.line((w//2,0,w//2,h),fill=(205,218,218,int(140*comparison)),width=max(1,int(2*scale)))
         for x,label in ((w*.08,"Earlier model"),(w*.58,"Encino Waves")):
-            draw.text((int(x),int(105*scale)),label,font=_font(int(28*scale)),fill=(235,239,236,255),stroke_width=1,stroke_fill=(0,0,0,160))
+            draw.text((int(x),int(105*scale)),label,font=_font(max(1,int(28*scale))),fill=(235,239,236,int(255*comparison)),stroke_width=1,stroke_fill=(0,0,0,int(160*comparison)))
     return np.asarray(Image.alpha_composite(image,overlay).convert("RGB"))
 
 
@@ -198,6 +181,190 @@ def render_shots(shots,output,*,sky=None,device="auto",width=1920,height=1080,fp
     finally:
         try: writer.close(commit=complete)
         finally: target.destroy()
+    manifest["render_seconds"]=time.perf_counter()-start
+    manifest["duration_seconds"]=manifest["frames"]/fps
+    Path(str(output)+".json").write_text(json.dumps(manifest,indent=2)+"\n")
+    return manifest
+
+
+class _Presentation_ocean:
+    """Advance one authored ocean without reseeding, amplitude blends or resets."""
+    def __init__(self,presentation,device):
+        self.presentation=presentation
+        self.basis=make_wave_basis(presentation.initial.parameters,device)
+        self.state=state_from_basis(self.basis,presentation.initial.parameters)
+        self.foam=prepare_foam(self.state,presentation.start_time,presentation.foam,
+                               preroll=presentation.foam_preroll)
+        self.comparison_state=None
+        self.comparison_foam=None
+        self.elapsed=0.
+
+    def advance(self,sample,elapsed):
+        if not math.isfinite(elapsed) or elapsed<self.elapsed:
+            raise ValueError("Presentation frames must advance forward")
+        self.elapsed=elapsed
+        t=self.presentation.start_time+elapsed
+        parameters=sample.state.parameters
+        if parameters!=self.state.parameters:
+            self.state=edit_state(self.basis,self.state,parameters,t)
+        frame=evaluate(self.state,t)
+        self.foam=advance_foam_to(self.foam,self.state,frame,self.presentation.foam)
+        comparison_frame=None
+        if sample.state.comparison>0:
+            other_parameters=parameters.tessendorf()
+            first=self.comparison_state is None
+            if first or self.comparison_state.parameters!=other_parameters:
+                self.comparison_state=state_from_basis(self.basis,other_parameters)
+            # The comparison changes directional/spectral amplitudes only.
+            # Its dispersion and travelling-wave phase exactly match the main sea.
+            self.comparison_state=replace(self.comparison_state,phase=self.state.phase,
+                                           phase_steps=self.state.phase_steps)
+            if first:
+                self.comparison_foam=prepare_foam(self.comparison_state,t,self.presentation.foam,
+                                                  preroll=self.presentation.foam_preroll)
+            comparison_frame=evaluate(self.comparison_state,t)
+            self.comparison_foam=advance_foam_to(self.comparison_foam,self.comparison_state,
+                                                comparison_frame,self.presentation.foam)
+        return frame,self.foam,comparison_frame,self.comparison_foam
+
+
+class _Comparison_overlay:
+    """Fade an independently rendered full-projection comparison onto the left."""
+    def __init__(self,device,main,comparison,format):
+        self.device=device
+        self.target=device.create_texture(size=main.size,format=format,
+            usage=wgpu.TextureUsage.RENDER_ATTACHMENT|wgpu.TextureUsage.COPY_SRC)
+        self.target_view=self.target.create_view()
+        self.uniform=device.create_buffer(size=16,usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
+        shader=device.create_shader_module(code="""
+            @group(0) @binding(0) var current: texture_2d<f32>;
+            @group(0) @binding(1) var earlier: texture_2d<f32>;
+            @group(0) @binding(2) var<uniform> amount: vec4f;
+            @vertex fn vertex(@builtin(vertex_index) i:u32)->@builtin(position) vec4f {
+                let p=vec2f(f32((i<<1u)&2u),f32(i&2u));
+                return vec4f(p*2.0-1.0,0.0,1.0);
+            }
+            @fragment fn fragment(@builtin(position) p:vec4f)->@location(0) vec4f {
+                let pixel=vec2i(p.xy);
+                let base=textureLoad(current,pixel,0);
+                if p.x < f32(textureDimensions(current).x)*.5 {
+                    return mix(base,textureLoad(earlier,pixel,0),amount.x);
+                }
+                return base;
+            }
+        """)
+        self.pipeline=device.create_render_pipeline(layout="auto",
+            vertex={"module":shader,"entry_point":"vertex"},
+            fragment={"module":shader,"entry_point":"fragment","targets":[{"format":format}]})
+        self.group=device.create_bind_group(layout=self.pipeline.get_bind_group_layout(0),entries=[
+            {"binding":0,"resource":main.create_view()},
+            {"binding":1,"resource":comparison.create_view()},
+            {"binding":2,"resource":{"buffer":self.uniform}}])
+
+    def compose(self,opacity):
+        self.device.queue.write_buffer(self.uniform,0,np.array([opacity,0,0,0],np.float32))
+        encoder=self.device.create_command_encoder()
+        render_pass=encoder.begin_render_pass(color_attachments=[{
+            "view":self.target_view,"load_op":"clear","store_op":"store","clear_value":(0,0,0,1)}])
+        render_pass.set_pipeline(self.pipeline)
+        render_pass.set_bind_group(0,self.group)
+        render_pass.draw(3)
+        render_pass.end()
+        self.device.queue.submit([encoder.finish()])
+        return self.target
+
+    def destroy(self):
+        self.target.destroy()
+        self.uniform.destroy()
+
+
+def render_presentation(presentation,output,*,sky=None,device="auto",width=1920,height=1080,fps=24,
+                        captions=True,codec="h264",overwrite=False,max_mbps=None,progress=print):
+    """Render the continuous timeline; only displayed comparison pixels dissolve.
+
+    Frame times are absolute and derived from the output frame index. A single
+    post-seed basis, accumulated wave phase and foam history span all cues.
+    ``render_shots`` remains the independent saved-scene/shot export path.
+    """
+    if width<=0 or height<=0 or width%2 or height%2:
+        raise ValueError("Movie dimensions must be positive and even")
+    if not isinstance(fps,int) or not 1<=fps<=120:
+        raise ValueError("fps must be an integer between 1 and 120")
+    frame_count=round(presentation.duration*fps)
+    if frame_count<1: raise ValueError("Presentation is shorter than one output frame")
+    graphics=make_device()
+    mesh_scale=max(1.0,width/1920,height/1080)
+    mesh_resolution=(round(960*mesh_scale),round(576*mesh_scale))
+    renderer=Ocean_renderer(graphics,sky,mesh_resolution=mesh_resolution)
+    def target():
+        return graphics.create_texture(size=(width,height,1),format=renderer.format,
+            usage=wgpu.TextureUsage.RENDER_ATTACHMENT|wgpu.TextureUsage.COPY_SRC|wgpu.TextureUsage.TEXTURE_BINDING)
+    main_target=target()
+    main_view=main_target.create_view()
+    comparison_renderer=comparison_target=comparison_view=overlay=None
+    writer=Movie_writer(output,width,height,fps,codec,overwrite,max_mbps)
+    cues=[]
+    elapsed=0.
+    previous=presentation.initial
+    for cue in presentation.cues:
+        cues.append({**asdict(cue),"start_seconds":elapsed,"end_seconds":elapsed+cue.duration,
+                     "control":changed_control(previous,cue.target)})
+        elapsed+=cue.duration
+        previous=cue.target
+    manifest={"type":"continuous_presentation","fps":fps,"width":width,"height":height,
+        "sky":str(sky) if sky else renderer.sky_name,"graphics":dict(graphics.adapter.info),
+        "frames":0,"max_mbps":max_mbps,"mesh_resolution":mesh_resolution,
+        "antialiasing_samples":renderer.sample_count,"codec":codec,"captions":captions,
+        "wave_resolution":presentation.initial.parameters.resolution,"foam_resolution":presentation.foam.resolution,
+        "initial":asdict(presentation.initial),"look":asdict(presentation.look),"foam":asdict(presentation.foam),
+        "start_time":presentation.start_time,"foam_preroll":presentation.foam_preroll,
+        "timeline_seconds":presentation.duration,"cues":cues,
+        "comparison":{"parameters":asdict(presentation.initial.parameters.tessendorf()),
+                      "layout":"left-half opacity overlay","projection":"matched full frame"}}
+    start=time.perf_counter()
+    complete=False
+    try:
+        ocean=_Presentation_ocean(presentation,device)
+        previous_cue=None
+        for index in range(frame_count):
+            elapsed=index/fps
+            sample=sample_presentation(presentation,elapsed)
+            cue=presentation.cues[sample.cue_index]
+            if sample.cue_index!=previous_cue:
+                progress(f"Cue {sample.cue_index+1}/{len(presentation.cues)} at {elapsed:.2f} s: {cue.title}",flush=True)
+                previous_cue=sample.cue_index
+            frame,foam,other_frame,other_foam=ocean.advance(sample,elapsed)
+            renderer.upload(frame)
+            renderer.upload_foam(foam)
+            renderer.draw(main_view,width,height,sample.state.camera,presentation.look)
+            output_target=main_target
+            if other_frame is not None:
+                if comparison_renderer is None:
+                    comparison_renderer=Ocean_renderer(graphics,sky,mesh_resolution=mesh_resolution)
+                    comparison_target=target()
+                    comparison_view=comparison_target.create_view()
+                    overlay=_Comparison_overlay(graphics,main_target,comparison_target,renderer.format)
+                comparison_renderer.upload(other_frame)
+                comparison_renderer.upload_foam(other_foam)
+                # Both passes have the same full-size projection. The overlay
+                # masks pixels only after rendering, so the camera never jumps.
+                comparison_renderer.draw(comparison_view,width,height,sample.state.camera,presentation.look)
+                output_target=overlay.compose(sample.state.comparison)
+            rgba=read_rgba(graphics,output_target,width,height)
+            rgb=(caption_image(rgba,cue.title,cue.caption,sample.state.parameters,sample.state.comparison,
+                               opacity=sample.caption_opacity,rounded_controls=True) if captions else rgba[...,:3])
+            writer.write(rgb)
+            manifest["frames"]+=1
+            if index and index%(fps*5)==0:
+                progress(f"  {elapsed:.0f}/{presentation.duration:g} s rendered",flush=True)
+        manifest["final_phase_steps"]=[asdict(step) for step in ocean.state.phase_steps]
+        complete=True
+    finally:
+        try: writer.close(commit=complete)
+        finally:
+            main_target.destroy()
+            if comparison_target is not None: comparison_target.destroy()
+            if overlay is not None: overlay.destroy()
     manifest["render_seconds"]=time.perf_counter()-start
     manifest["duration_seconds"]=manifest["frames"]/fps
     Path(str(output)+".json").write_text(json.dumps(manifest,indent=2)+"\n")
