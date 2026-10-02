@@ -25,6 +25,12 @@ class Texture_copy(ctypes.Structure):
                 ("height",ctypes.c_uint32), ("foam",ctypes.c_uint32)]
 
 
+def wait_for_graphics(device):
+    """Complete queued graphics work without reading any texture or field."""
+    from wgpu.backends.wgpu_native._ffi import ffi, lib
+    lib.wgpuDevicePoll(device._internal,True,ffi.NULL)
+
+
 def _load_bridge():
     import fcntl
     source = Path(__file__).parent/"native/metal_transfer.mm"
@@ -108,7 +114,7 @@ class Metal_transfer:
         # is backpressure only, not a wait at every compute/graphics handoff.
         if len(self.pending) >= 6: self.wait()
         # No field readback: wait for previous sampling before overwriting.
-        self.lib.wgpuDevicePoll(self.device._internal,True,self.ffi.NULL)
+        wait_for_graphics(self.device)
         array = (Texture_copy*len(copies))(*copies)
         ticket = self.bridge.encino_metal_upload(self.context,array,len(copies))
         if not ticket: self._error()

@@ -70,6 +70,7 @@ class Ocean_renderer:
         if sample_count not in (1,4):
             raise ValueError("Antialiasing sample count must be 1 or 4")
         self.sample_count = sample_count
+        self._physical_ready = device.adapter.info.get("backend_type") != "Metal"
         self.mesh_resolution = mesh_resolution
         self.uniform = device.create_buffer(size=496, usage=wgpu.BufferUsage.UNIFORM|wgpu.BufferUsage.COPY_DST)
         self.wave_sampler = device.create_sampler(address_mode_u="repeat", address_mode_v="repeat",
@@ -372,6 +373,17 @@ class Ocean_renderer:
                     {"binding":2,"resource":{"buffer":self.uniform}}])
 
     def draw(self,target_view,width,height,camera=Camera(),look=Look(),viewport=None,clear=True):
+        if not self._physical_ready and look.material == "physical":
+            # On Metal the first filtered physical draw can differ from later
+            # draws with bit-identical inputs. Complete one priming draw before
+            # presenting it; this fence reads no wave or image data to the CPU.
+            from .metal_transfer import wait_for_graphics
+            self._draw(target_view,width,height,camera,look,viewport,clear)
+            wait_for_graphics(self.device)
+            self._physical_ready = True
+        self._draw(target_view,width,height,camera,look,viewport,clear)
+
+    def _draw(self,target_view,width,height,camera,look,viewport,clear):
         if self.frame is None:
             raise RuntimeError("Upload a wave frame before drawing")
         sky_pipeline,ocean_pipeline = self._select_material(look.material)

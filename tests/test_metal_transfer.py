@@ -57,7 +57,8 @@ def test_exact_wave_and_foam_packing_including_storage_offsets(device):
     np.testing.assert_allclose(astuple(gpu.shading_statistics),astuple(host.shading_statistics),rtol=2e-6,atol=1e-8)
 
 
-def test_render_matches_and_animation_never_reads_fields_to_cpu(device):
+@pytest.mark.parametrize("first_transfer",("metal","host"))
+def test_render_matches_and_animation_never_reads_fields_to_cpu(device,first_transfer):
     state = make_initial_state(Wave_parameters(resolution=128),"mps")
     frame = evaluate(state,12)
     foam = prepare_foam(state,12,Foam_parameters(resolution=64),preroll=.3)
@@ -68,15 +69,19 @@ def test_render_matches_and_animation_never_reads_fields_to_cpu(device):
     # Floating reduction order can differ by an ulp; isolate the field handoff.
     gpu.restore_shading_statistics(host.shading_statistics)
     next_frame = evaluate(state,12.1)
+    host.upload(next_frame)
+    host.upload_foam(foam)
+    if first_transfer == "host":
+        expected = host.render_image(320,240)
     with patch.object(torch.Tensor,"cpu",side_effect=AssertionError("Host readback")), \
          patch.object(torch.Tensor,"numpy",side_effect=AssertionError("NumPy packing")), \
          patch("encino_waves.render.texture_arrays",side_effect=AssertionError("Host field packing")):
         gpu.upload(next_frame)
         gpu.upload_foam(foam)
         actual = gpu.render_image(320,240)
-    host.upload(next_frame)
-    host.upload_foam(foam)
-    expected = host.render_image(320,240)
+        np.testing.assert_array_equal(actual,gpu.render_image(320,240))
+    if first_transfer == "metal":
+        expected = host.render_image(320,240)
     np.testing.assert_array_equal(actual,expected)
 
 

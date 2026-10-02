@@ -703,11 +703,20 @@ For published context, [Tessendorf, Reinhardt and Gao, Whitecap Phenomenology fo
 Ocean Surface Simulation](https://jtessen.people.clemson.edu/gilligan/html/whitecap_fraction.pdf)
 describes minimum-eigenvalue emission and persistent, decaying whitecap textures.
 
+The Metal renderer completes one physical warm-up draw before its first visible
+frame. Local checks found a deterministic first-frame sampling difference with
+bit-identical textures and uniforms, including through the host upload path and
+the previous shader. A completed draw removes it; submitting two draws without
+a completion fence does not. This is a contained backend workaround, not a
+change to the waves or material. It reads no fields or images to the CPU and
+adds no work to subsequent frames. The exact image comparison covers both
+upload paths in either draw order, and the first image versus a repeated draw.
+
 ## Verification limits
 
 The Mac's Metal compute, offscreen graphics, and rendered ImGui interface are
-exercised locally. After the spatial trough and camera fixes, the presentation
-branch passed 250 numerical and rendering checks, with 25 unavailable-device/
+exercised locally. After the haze, continuous presentation and first-frame fixes,
+the presentation branch passed 265 numerical and rendering checks, with 25 unavailable-device/
 reference skips. The UI check exercises camera events, continuous
 wind/depth editing, phase-preserving scene round-trip, comparison and all expanded
 panels, including with the supplied Dutch Skies HDR. Direction edits preserve
