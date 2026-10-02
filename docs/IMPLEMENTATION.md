@@ -140,6 +140,8 @@ CUDA uses the same tensor operations; NVIDIA hardware remains untested here.
 ## Paper and historical implementations
 
 The paper and checked-in source are not numerically identical in every detail.
+Hasselmann is the default directional spreading model, as in the original C++
+parameters. Tessendorf mode still selects positive cosine-squared spreading.
 The default `convention="paper"` uses:
 
 - Fetch converted to metres for both spectrum and spreading.
@@ -149,6 +151,22 @@ The default `convention="paper"` uses:
   explicitly permitted in section 5.1.5.
 - The original implementation's Pierson-Moskowitz constants and JONSWAP peak
   parameterization. JONSWAP gamma is explicitly 3.3 (equation 28).
+
+The 2025 Torch comparison (`234835a`, on `feature/simplified_debug`) rewrote the
+smooth TMA depth factor as `sigmoid(3.6 * (wh - 1.125))`, where
+`wh = omega * sqrt(depth / gravity)`. The CPU reference and GPU implementation
+both use that form. It is algebraically identical to the original
+`0.5 + 0.5*tanh(1.8 * (wh - 1.125))`, avoiding cancellation toward the low end of
+the curve. The factor's physical input bounds limit that cancellation, so this
+is a modest numerical improvement, not a change in the spectrum model.
+
+The same historical commit replaced the direct Hasselmann gamma-function ratio
+with log-gamma evaluation to prevent overflowing intermediate factors. The
+current GPU setup already combines this with the gamma duplication identity:
+`log(Q) = lgamma(s+1) - lgamma(s+0.5) - log(2*sqrt(pi))`. This avoids separately
+forming the large power of two and gamma factors; it is particularly useful at
+large swell. The dispersion derivative also avoids overflowing `cosh(h*k)` by
+using `sech²(h*k) = 1 - tanh²(h*k)`.
 
 `legacy_2015` preserves the master's fetch-unit omission, its half-circle
 36-segment normalization for product spreading, and its 16.1 swell coefficient.
@@ -260,6 +278,19 @@ changes the existing shader's scattering, extinction and phase coefficients;
 surface density supplies a separate foam coverage layer. Dilute remnants become
 transparent rather than whitening the whole sea. Disabling persistent foam
 uses the original crest shading, with the original water constants.
+
+The default surface half-life
+is 1.5 s, diffusion 0.56 m²/s, exchange 0.29/s, and underwater strength 1.25;
+emission remains 1.2/s with full fractal breakup.
+
+The wind-streak experiment and its extra immediate crest overlay have been
+removed. The emission, aging, breakup and foam shader are restored to `d390aea`,
+with the artist-selected defaults above. At identical wave fields and controls,
+the restored RGB history matches that implementation exactly on Metal. The
+four emission octaves and separate fine shader grain retain their original
+scales and weights. Version 1 and 2 checkpoints still load: only the RGB density
+is restored, and known retired appearance settings and windrow arrays are
+ignored. The experiment remains available in Git history (`cafc4cf`).
 
 On this M2 Max, synchronized foam update work measured approximately 2.2 ms with
 1024² waves and a 512² foam map, and 6.9 ms with 4096² waves and the same foam map

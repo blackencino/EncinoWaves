@@ -21,14 +21,22 @@ class Foam_parameters:
     emission: float = 1.2             # aeration density per second
     crest_start: float = .5           # original normalized crest-map threshold
     crest_width: float = .6
-    surface_half_life: float = 3.0    # seconds
+    surface_half_life: float = 1.5    # seconds
     shallow_half_life: float = 6.0
     deep_half_life: float = 12.0
-    diffusion: float = .12            # surface m^2/s; shallow/deep spread faster
-    exchange: float = .18             # shallow -> deep, per second
+    diffusion: float = .56            # surface m^2/s; shallow/deep spread faster
+    exchange: float = .29             # shallow -> deep, per second
     breakup: float = 1.0
     noise_scale: float = 24.0         # metres, rounded to a periodic cell count
     noise_speed: float = .12          # radians/second
+
+    @classmethod
+    def from_dict(cls, values):
+        # Import saved scenes from the retired wind-streak experiment. Only
+        # those known controls are discarded; misspelled active controls fail.
+        retired = {"windrows", "windrow_spacing", "windrow_half_life",
+                   "windrow_gathering", "windrow_warp", "windrow_warp_period"}
+        return cls(**{name:value for name,value in values.items() if name not in retired})
 
     def __post_init__(self):
         n = self.resolution
@@ -207,7 +215,7 @@ def update_foam(state, frame, parameters=Foam_parameters(), crest_gain=1.0, cres
 
 def save_foam(path, state):
     """Lossless portable checkpoint; the inexpensive noise basis is regenerated."""
-    np.savez_compressed(path, version=1, time=state.time,
+    np.savez_compressed(path, version=2, time=state.time,
         parameters=json.dumps(asdict(state.parameters)),
         waves=json.dumps(asdict(state.reference_parameters)),
         density=state.density.cpu().numpy(),crest_gain=state.crest_gain,crest_bias=state.crest_bias)
@@ -215,8 +223,10 @@ def save_foam(path, state):
 
 def load_foam(path, device="auto"):
     with np.load(path, allow_pickle=False) as data:
-        if int(data["version"]) != 1: raise ValueError("Unsupported foam snapshot version")
-        p = Foam_parameters(**json.loads(str(data["parameters"])))
+        if int(data["version"]) not in (1,2): raise ValueError("Unsupported foam snapshot version")
+        # Version 2 may also contain a windrows array. Restore only the original
+        # RGB density; the retired layer must never re-enter the surface texture.
+        p = Foam_parameters.from_dict(json.loads(str(data["parameters"])))
         waves = Wave_parameters(**json.loads(str(data["waves"])))
         density = data["density"]
         if (density.shape != (3,p.resolution,p.resolution) or density.dtype != np.float32 or

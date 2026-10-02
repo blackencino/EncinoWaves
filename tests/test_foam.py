@@ -1,5 +1,6 @@
 """History, periodic diffusion, depth exchange, checkpoints and wave isolation."""
-from dataclasses import replace
+from dataclasses import asdict, replace
+import json
 import math
 import numpy as np
 import pytest
@@ -80,7 +81,7 @@ def test_reset_policy_preserves_rotation_and_resets_large_edits(device):
     state = step_foam(state,source(.1,device))
     for changes in ({"wind_direction":127},{"resolution":64},{"wind_speed":18},{"depth":95}):
         assert foam_reset_reason(state,replace(waves,**changes),p) is None
-    for changes in ({"seed":8},{"domain":100},{"depth":3},{"wind_speed":30},{"swell":1},{"spreading":"hasselmann"}):
+    for changes in ({"seed":8},{"domain":100},{"depth":3},{"wind_speed":30},{"swell":1},{"spreading":"donelan_banner"}):
         frame = source(.2,device,parameters=replace(waves,**changes))
         reset = update_foam(state,frame,p)
         assert reset.time == .2 and torch.count_nonzero(reset.density) == 0
@@ -117,3 +118,42 @@ def test_foam_checkpoint_replays_and_survives_wave_resolution_change(device,tmp_
 @pytest.mark.parametrize("changes",({"resolution":100},{"diffusion":-1},{"emission":float("nan")},{"surface_half_life":0},{"breakup":2}))
 def test_invalid_foam_controls(changes):
     with pytest.raises(ValueError): Foam_parameters(**changes)
+
+
+@pytest.mark.parametrize("version",(1,2))
+def test_old_foam_checkpoints_preserve_rgb_and_discard_retired_streaks(version,tmp_path):
+    p = Foam_parameters(resolution=32,emission=1.8)
+    waves = Wave_parameters(resolution=32)
+    state = step_foam(make_foam_state(waves,0,p,"cpu"),source(.1,"cpu",parameters=waves))
+    path = tmp_path/"old_foam.npz"
+    save_foam(path,state)
+    with np.load(path,allow_pickle=False) as data:
+        arrays = dict(data)
+    arrays["version"] = version
+    if version == 2:
+        parameters = asdict(p)
+        parameters.update(windrows=.45,windrow_spacing=32,windrow_half_life=45,
+                          windrow_gathering=.35,windrow_warp=2,windrow_warp_period=120)
+        arrays["parameters"] = json.dumps(parameters)
+        arrays["windrows"] = np.full((32,32),100,np.float32)
+    np.savez_compressed(path,**arrays)
+    loaded = load_foam(path,"cpu")
+    assert loaded.parameters == p
+    torch.testing.assert_close(loaded.density,state.density,atol=0,rtol=0)
+    torch.testing.assert_close(step_foam(loaded,source(.2,"cpu")).density,
+                               step_foam(state,source(.2,"cpu")).density,atol=0,rtol=0)
+    save_foam(path,loaded)
+    with np.load(path,allow_pickle=False) as data:
+        assert "windrows" not in data
+        assert "windrows" not in json.loads(str(data["parameters"]))
+
+
+def test_old_scene_controls_preserve_lighting_and_foam_without_extra_layers():
+    from encino_waves.render import Look
+    look = Look(exposure=.7,aeration=1.25)
+    saved = dict(asdict(look),crest_foam=.8,crest_breakup=.6)
+    assert Look.from_dict(saved) == look
+    p = Foam_parameters(emission=1.2,surface_half_life=1.5,diffusion=.56,exchange=.29)
+    assert Foam_parameters.from_dict(dict(asdict(p),windrows=.9)) == p
+    with pytest.raises(TypeError): Look.from_dict(dict(saved,exposurre=1))
+    with pytest.raises(TypeError): Foam_parameters.from_dict(dict(asdict(p),emmisssion=1))
