@@ -13,6 +13,16 @@ def parser():
     root=argparse.ArgumentParser(prog="encino-waves",description="Encino Waves: GPU ocean synthesis and viewer")
     sub=root.add_subparsers(dest="command")
     view=sub.add_parser("view",help="Open the native viewer")
+    academy=sub.add_parser("academy-view",help="Open the fixed 1080p Academy viewer")
+    academy.add_argument("--device",default="auto",help="auto, mps, cuda[:index], or cpu")
+    academy.add_argument("--sky",type=Path,help="Local HDR sky panorama")
+    academy.add_argument("--scene",type=Path,help="JSON saved by the viewer")
+    academy.add_argument("--preset",type=int,choices=range(1,7),default=3)
+    academy_render=sub.add_parser("academy-render",help="Render an Academy rehearsal as 1080p24 H.264 MOV")
+    academy_render.add_argument("rehearsal",type=Path)
+    academy_render.add_argument("output",type=Path)
+    academy_render.add_argument("--device",default="auto",help="auto, mps, cuda[:index], or cpu")
+    academy_render.add_argument("--overwrite",action="store_true")
     still=sub.add_parser("still",help="Render a PNG offscreen")
     render=sub.add_parser("render",help="Render a deterministic movie")
     demo=sub.add_parser("demo",help="Render the continuous five-minute Academy presentation")
@@ -87,6 +97,12 @@ def main(argv=None):
     if args.command=="view":
         from .viewer import Viewer
         Viewer(args.resolution,args.device,args.sky,args.preset-1,scene=args.scene).run(); return
+    if args.command=="academy-view":
+        from .academy_viewer import AcademyViewer
+        AcademyViewer(device=args.device,sky=args.sky,preset=args.preset-1,scene=args.scene).run(); return
+    if args.command=="academy-render":
+        from .academy_export import render_rehearsal
+        render_rehearsal(args.rehearsal,args.output,device=args.device,overwrite=args.overwrite); return
     from .presets import scene_with_resolution
     from .render import Ocean_renderer, make_device, Camera, Look, Shading_statistics
     from .export import Shot,render_shots,render_presentation

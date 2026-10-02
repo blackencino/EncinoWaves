@@ -11,7 +11,7 @@ struct Uniforms {
     grid: vec4f,         // x segments, y segments, near distance, far distance
     statistics: vec4f,   // big height, crest gain, crest bias, max crest
     moon_color: vec4f,
-    aeration: vec4f,      // use foam history, subsurface strength, crest crumble, compression threshold
+    aeration: vec4f,      // use foam history, subsurface strength, foam fringe strength, compression threshold
     optics: vec4f,        // unresolved RMS slope, max environment mip, visibility metres, compression width
     diffuse_sh: array<vec4f,9>, // cosine-convolved radiance, already divided by pi
     ambient_sh: array<vec4f,9>, // same, with the compact direct source removed
@@ -303,7 +303,7 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
             +foam_reflectance*filtered_reflection(reflect(-view,foam_normal),foam_roughness);
         let water_light=color;
         color=mix(color,foam_light,coverage);
-        if u.aeration.z>.5 {
+        if u.aeration.z>0.0 {
             // Transient tongues attached to current compression. Alpha stores
             // their exclusive area after subtracting history at each subsample.
             let minimum_stretch=-textureSample(displacements,wave_sampler,in.uv).w;
@@ -313,7 +313,8 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
             // Use the wave footprint, independently of the history resolution.
             let crest_footprint=footprint*max(1.0,u.ocean.y/size.x);
             let crest_filtered_weight=smoothstep(.6,1.5,crest_footprint);
-            let extra=clamp(mix(close_crest,filtered_material.a,crest_filtered_weight),0.0,1.0-coverage);
+            let extra=clamp(mix(close_crest,filtered_material.a,crest_filtered_weight),0.0,1.0-coverage)
+                *clamp(u.aeration.z,0.0,1.0);
             // Give newly breaking water its own fresh response: history has no
             // meaningful age outside the deposited foam. Relief stays in cm.
             var breaking_normal=foam_detail_normal(normal,detail,u.environment.w);

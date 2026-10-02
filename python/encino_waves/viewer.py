@@ -28,12 +28,12 @@ class Viewer:
         self.context=self.canvas.get_wgpu_context()
         self.format=self.context.get_preferred_format(self.device.adapter).removesuffix("-srgb")
         self.context.configure(device=self.device,format=self.format,usage=wgpu.TextureUsage.RENDER_ATTACHMENT|wgpu.TextureUsage.COPY_SRC)
-        self.renderer=Ocean_renderer(self.device,sky,target_format=self.format)
+        self.renderer=self._create_renderer(sky)
         self.comparison_renderer=None
         self.sky_path=sky
         self.device_name=device
         self.selected_scene=preset
-        initial_scene=scene_with_resolution(preset,resolution)
+        initial_scene=self._initial_scene(preset,resolution)
         self.parameters,self.camera,self.look=initial_scene.parameters,initial_scene.camera,initial_scene.look
         self.basis=make_wave_basis(self.parameters,device)
         self.state=state_from_basis(self.basis,self.parameters)
@@ -74,13 +74,22 @@ class Viewer:
         self.pointer=None
         self.pointer_buttons=()
         self.pointer_modifiers=()
-        self.gui=ImguiRenderer(self.device,self.canvas,self.format)
+        self.gui=self._create_gui()
         self.gui.set_gui(self.draw_gui)
         self._style()
         self.canvas.add_event_handler(self.on_key,"key_down")
         self.canvas.add_event_handler(self.on_pointer,"pointer_down","pointer_move","pointer_up","wheel")
         if scene: self.load_scene(scene)
         self.canvas.request_draw(self.draw)
+
+    def _create_gui(self):
+        return ImguiRenderer(self.device,self.canvas,self.format)
+
+    def _initial_scene(self,preset,resolution):
+        return scene_with_resolution(preset,resolution)
+
+    def _create_renderer(self,sky):
+        return Ocean_renderer(self.device,sky,target_format=self.format)
 
     def _style(self):
         style=imgui.get_style()
@@ -147,7 +156,7 @@ class Viewer:
             self.comparison_state=None
             self.post_seed=True
             self.reset_requested=False
-        parameters=follow_parameters(self.state.parameters,desired,elapsed)
+        parameters=self._follow_parameters(self.state.parameters,desired,elapsed)
         if parameters!=self.state.parameters:
             self.state=edit_state(self.basis,self.state,parameters,self.time)
             self.post_seed=True
@@ -165,6 +174,9 @@ class Viewer:
             self.comparison_state=None
         self.changed=self.state.parameters!=desired
 
+    def _follow_parameters(self,current,desired,elapsed):
+        return follow_parameters(current,desired,elapsed)
+
     def _upload_state(self,renderer,state,previous):
         # An orientation edit only changes the mesh transform. A paused ocean
         # can keep its FFT results and textures, including in comparison view.
@@ -178,9 +190,12 @@ class Viewer:
         elif renderer.frame.parameters!=state.parameters:
             renderer.frame=replace(renderer.frame,parameters=state.parameters)
 
+    def _frame_delta(self,now):
+        return min(now-self.last_time,.1)
+
     def draw(self):
         now=time.perf_counter()
-        delta=min(now-self.last_time,.1)
+        delta=self._frame_delta(now)
         self.last_time=now
         self._poll_files()
         # Occluded / minimized windows cancel here before doing ocean work.
@@ -211,7 +226,7 @@ class Viewer:
         view=target.create_view()
         if self.comparing and self.comparison_state is not None:
             if self.comparison_renderer is None:
-                self.comparison_renderer=Ocean_renderer(self.device,self.sky_path,target_format=self.format)
+                self.comparison_renderer=self._create_renderer(self.sky_path)
             self._upload_state(self.comparison_renderer,self.comparison_state,self.rendered_comparison_state)
             self.rendered_comparison_state=self.comparison_state
             if self.saved_comparison_shading is not None:
@@ -266,9 +281,12 @@ class Viewer:
                 metadata[name]=checkpoint.name
         path.write_text(json.dumps(metadata,indent=2)+"\n")
 
+    def _parameters_from_scene(self,saved):
+        return Wave_parameters.from_dict(saved.get("requested_parameters",saved["parameters"]))
+
     def load_scene(self,path):
         saved=json.loads(Path(path).read_text())
-        self.parameters=Wave_parameters.from_dict(saved.get("requested_parameters",saved["parameters"]))
+        self.parameters=self._parameters_from_scene(saved)
         self.camera=Camera(**saved["camera"])
         self.look=Look.from_dict(saved["look"])
         self.time=saved.get("time",10.0)
@@ -297,7 +315,7 @@ class Viewer:
         self.message=f"Loaded {Path(path).name}"
 
     def load_sky(self,path):
-        renderer=Ocean_renderer(self.device,path,target_format=self.format)
+        renderer=self._create_renderer(path)
         if self.renderer.frame is not None:
             self.saved_shading=self.renderer.shading_statistics
         if self.comparison_renderer is not None and self.comparison_renderer.frame is not None:
@@ -378,14 +396,16 @@ class Viewer:
                 glfw.set_window_monitor(window,monitor,0,0,mode.size.width,mode.size.height,mode.refresh_rate)
 
     def on_pointer(self,event):
-        if imgui.get_io().want_capture_mouse: return
         kind=event["event_type"]
+        if kind=="pointer_up":
+            self.pointer=None
+            return
+        if imgui.get_io().want_capture_mouse: return
         width,height=self.canvas.get_logical_size()
         if kind=="pointer_down":
             self.pointer=(event["x"],event["y"])
             self.pointer_buttons=event.get("buttons",(event.get("button",1),))
             self.pointer_modifiers=event.get("modifiers",())
-        elif kind=="pointer_up": self.pointer=None
         elif kind=="pointer_move" and self.pointer:
             dx,dy=event["x"]-self.pointer[0],event["y"]-self.pointer[1]
             buttons=event.get("buttons",self.pointer_buttons)
@@ -418,14 +438,63 @@ class Viewer:
         if changed: self.edit_parameters(**{name:value})
         if imgui.is_item_hovered(): imgui.set_tooltip(help_text)
 
+    def _control_panel_rect(self,width,height):
+        panel_width=310
+        return width-panel_width-24,24,panel_width,height-48
+
+    def _header(self,label):
+        return imgui.collapsing_header(label)
+
+    def _tree(self,label):
+        return imgui.tree_node(label)
+
+    def _control_scroll(self):
+        pass
+
+    def _seek_time(self,value):
+        self.time=value
+        self.reset_foam()
+
+    def _draw_files_gui(self):
+        if self._header("Files & export"):
+            if imgui.button("Open scene..."): self._open_file("scene")
+            imgui.text_wrapped("Save still also saves camera, lighting and parameters as a scene.")
+            _,self.movie_seconds=imgui.slider_float("Duration",self.movie_seconds,1,300,"%.0f s")
+            rates=[24,25,30,60]
+            changed,index=imgui.combo("FPS",rates.index(self.movie_fps),[str(x) for x in rates])
+            if changed: self.movie_fps=rates[index]
+            sizes=[512,1024,2048,4096]
+            changed,index=imgui.combo("Movie waves",sizes.index(self.movie_resolution),[f"{x} x {x}" for x in sizes])
+            if changed: self.movie_resolution=sizes[index]
+            _,self.movie_compact=imgui.checkbox("Compact review copy (8 Mbps)",self.movie_compact)
+            imgui.begin_disabled(self.movie_process is not None or self.future is not None or self.changed)
+            if imgui.button("Export 1080p movie..."): self._open_file("movie")
+            imgui.end_disabled()
+
+    def _draw_navigation(self,width,height,fixed):
+        imgui.set_next_window_pos((20,height-42))
+        imgui.set_next_window_bg_alpha(.65)
+        imgui.begin("navigation",flags=fixed|imgui.WindowFlags_.always_auto_resize|imgui.WindowFlags_.no_inputs)
+        self._label("Alt + LMB  tumble    MMB  track    RMB  dolly    F  frame    Tab  hide UI",12,(.8,.85,.85,1))
+        imgui.end()
+
+    def _draw_comparison_labels(self,width,height,fixed):
+        if self.comparing:
+            for x,label in ((width*.15,"EARLIER MODEL"),(width*.60,"ENCINO WAVES")):
+                imgui.set_next_window_pos((x,125))
+                imgui.set_next_window_bg_alpha(.65)
+                imgui.begin(label,flags=fixed|imgui.WindowFlags_.always_auto_resize|imgui.WindowFlags_.no_inputs)
+                self._label(label,16,(.92,.94,.89,1))
+                imgui.end()
+
     def draw_gui(self):
         width,height=self.canvas.get_logical_size()
         fixed=imgui.WindowFlags_.no_decoration|imgui.WindowFlags_.no_move|imgui.WindowFlags_.no_saved_settings
         if not self.show_ui:
             return
-        panel_width=310
-        imgui.set_next_window_pos((width-panel_width-24,24))
-        imgui.set_next_window_size((panel_width,height-48))
+        panel_x,panel_y,panel_width,panel_height=self._control_panel_rect(width,height)
+        imgui.set_next_window_pos((panel_x,panel_y))
+        imgui.set_next_window_size((panel_width,panel_height))
         imgui.begin("ocean_controls",flags=fixed)
         self._label("Encino Waves",23,(.92,.94,.92,1))
         imgui.spacing()
@@ -459,9 +528,8 @@ class Viewer:
         imgui.end_disabled()
         changed,value=imgui.slider_float("Time",self.time,0,300,"%.1f s")
         if changed:
-            self.time=value
-            self.reset_foam()
-        if imgui.collapsing_header("Foam & aeration"):
+            self._seek_time(value)
+        if self._header("Foam & aeration"):
             changed,value=imgui.checkbox("Persistent foam",self.foam_parameters.enabled)
             if changed:
                 self.foam_parameters=replace(self.foam_parameters,enabled=value)
@@ -473,7 +541,7 @@ class Viewer:
             if changed: self.foam_parameters=replace(self.foam_parameters,surface_half_life=value)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Time for surface foam to fade to half its density after a break.")
-            if imgui.tree_node("Advanced foam"):
+            if self._tree("Advanced foam"):
                 models=["legacy","compression"]
                 changed,index=imgui.combo("Foam source",models.index(self.foam_parameters.emission_model),
                                          ["Original crests","Breaking waves"])
@@ -501,7 +569,7 @@ class Viewer:
                 if changed: self.foam_parameters=replace(self.foam_parameters,resolution=sizes[index])
                 imgui.text_wrapped("Physical edits keep foam history. New patches, seeds, models and time scrubbing clear it.")
                 imgui.tree_pop()
-        expanded=imgui.collapsing_header("Camera & light")
+        expanded=self._header("Camera & light")
         if expanded:
             views=presentation_views(self.parameters.domain)
             changed,index=imgui.combo("Compose view",0,["Choose a view..."]+[view.name for view in views])
@@ -529,7 +597,7 @@ class Viewer:
                 changed,value=imgui.slider_float(label,getattr(self.look,name),lo,hi,fmt)
                 if changed: self.look=replace(self.look,**{name:value})
             if imgui.button("Open HDR sky..."): self._open_file("sky")
-        expanded=imgui.collapsing_header("Resolution & model")
+        expanded=self._header("Resolution & model")
         if expanded:
             imgui.text("Directional spreading")
             models=["donelan_banner","hasselmann","mitsuyasu","cosine_squared"]
@@ -559,36 +627,14 @@ class Viewer:
             imgui.text(self.renderer.transfer_name)
             imgui.text_wrapped(self.renderer.sky_name)
             if self.frame_times: imgui.text(f"Frame work: {1000*np.median(self.frame_times):.1f} ms")
-        if imgui.collapsing_header("Files & export"):
-            if imgui.button("Open scene..."): self._open_file("scene")
-            imgui.text_wrapped("Save still also saves camera, lighting and parameters as a scene.")
-            _,self.movie_seconds=imgui.slider_float("Duration",self.movie_seconds,1,300,"%.0f s")
-            rates=[24,25,30,60]
-            changed,index=imgui.combo("FPS",rates.index(self.movie_fps),[str(x) for x in rates])
-            if changed: self.movie_fps=rates[index]
-            sizes=[512,1024,2048,4096]
-            changed,index=imgui.combo("Movie waves",sizes.index(self.movie_resolution),[f"{x} x {x}" for x in sizes])
-            if changed: self.movie_resolution=sizes[index]
-            _,self.movie_compact=imgui.checkbox("Compact review copy (8 Mbps)",self.movie_compact)
-            imgui.begin_disabled(self.movie_process is not None or self.future is not None or self.changed)
-            if imgui.button("Export 1080p movie..."): self._open_file("movie")
-            imgui.end_disabled()
+        self._draw_files_gui()
         if self.future: self._label("Building wave grid...",14,(.91,.76,.48,1))
         elif self.changed: self._label("Adjusting the sea...",14,(.91,.76,.48,1))
         if self.message: imgui.text_wrapped(self.message)
+        self._control_scroll()
         imgui.end()
-        imgui.set_next_window_pos((20,height-42))
-        imgui.set_next_window_bg_alpha(.65)
-        imgui.begin("navigation",flags=fixed|imgui.WindowFlags_.always_auto_resize|imgui.WindowFlags_.no_inputs)
-        self._label("Alt + LMB  tumble    MMB  track    RMB  dolly    F  frame    Tab  hide UI",12,(.8,.85,.85,1))
-        imgui.end()
-        if self.comparing:
-            for x,label in ((width*.15,"EARLIER MODEL"),(width*.60,"ENCINO WAVES")):
-                imgui.set_next_window_pos((x,125))
-                imgui.set_next_window_bg_alpha(.65)
-                imgui.begin(label,flags=fixed|imgui.WindowFlags_.always_auto_resize|imgui.WindowFlags_.no_inputs)
-                self._label(label,16,(.92,.94,.89,1))
-                imgui.end()
+        self._draw_navigation(width,height,fixed)
+        self._draw_comparison_labels(width,height,fixed)
 
     def run(self):
         print(f"Compute: {self.state.device}; graphics: {dict(self.device.adapter.info)}",flush=True)

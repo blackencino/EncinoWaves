@@ -24,6 +24,75 @@ fringe are consolidated on `academy/gpu-showcase`. Use this checkout for the
 viewer; the separate visual-polish and crest-study worktrees have been retired.
 The geometric crest wrinkle is excluded.
 
+### Academy rehearsal viewer
+
+Run `./run_academy_viewer.command` for the separate Academy presentation viewer.
+It opens a large, resizable **16:9** preview fitted to the desktop, including on
+Retina displays. Movie output remains fixed at **1920×1080**.
+The controls stay within **y=200–880**, applying the Academy artwork diagram's
+400-pixel UHD top/bottom clearance proportionally to HD. This is a conservative
+layout choice for the presentation, not a separate video-title-safe requirement.
+
+Startup is an unrecorded preparation view: adjust the sea and camera first.
+Pressing R first builds six seconds of foam history, then starts a four-second black **Encino Waves / Interactive Ocean Synthesis**
+title card with **Christopher Jon Horvath** beneath the subtitle, followed by a
+smooth reveal. The default sea has a 1024 m domain,
+17 m/s wind, 100 m depth, 300 km fetch, trough damping 1, and half-strength foam
+fringe. The camera is 145.2 m high, pitch −18.1°, heading −139.9°.
+
+Press **R** to record a performance, then **R** to cut and automatically save.
+Foam preparation and checkpoint saving finish before the recording clock starts;
+the final render loads that warmed foam. For audio sync, cue from the title/REC
+clock appearing after preparation, rather than from the R keypress.
+The operator clock shows elapsed and remaining time, including during the title;
+it is omitted from the movie. **Render rehearsal** renders the saved take offline.
+**W** selects Wind Speed, **D** Ocean Depth, **F** Fetch,
+**S** Swell, and **M** Foam. Foam adjusts visible foam strength from 0–200%,
+is recorded for playback, and stays out of telemetry.
+Left/right arrow keys accelerate the selected control; release
+to let it settle with a heavier glide (0.30 s acceleration / 0.45 s release response).
+The arrows' weight follows actual movement. Press the mode key
+again to dismiss it, or let the label fade after 1.5 seconds without input.
+Each press of **E** advances directly through the four named seas, wrapping to
+the first after the last. Every example
+retains the same patch and seed, with smooth changes in sea state and camera.
+**I** toggles large title-safe telemetry: wind speed in knots, ocean depth in
+meters, fetch in kilometers, and unitless swell. Its short fades and visibility
+are recorded in the take. Patch size is omitted from the presentation overlay.
+
+Live Maya camera gestures are unchanged. The recording keeps the camera before
+an adjustment and its settled position after four seconds without another tweak;
+offline playback makes one eased move between those endpoints. Control mode and
+direction edges, and ease boundary values, use **wall-clock time**, independent
+of preview frame rate. **Tab** opens setup/files, including **Reset opening ocean**.
+Each recording starts its title card again from the currently configured sea.
+Keep each rehearsal folder intact: its starting scene and foam checkpoints live
+beside the timeline. The default location is the gitignored
+`renders/academy_YYYYMMDD_HHMMSS_<unique>/rehearsal.json`. Rehearsals autosave once
+per second. **Save recording as** in setup copies the take and its checkpoints to
+the chosen location; **Open rehearsal** reopens a saved take for rendering.
+
+Offline playback uses exact **24 fps** timing and **4096² waves**, with the
+recorded camera, lighting, at least 1024² foam, and presentation overlays. Output is an
+**H.264 High MOV**, 80 Mbps target / 120 Mbps maximum, with an explicit sRGB to
+Rec.709 conversion. One second of black at each end leaves **4:58** for rehearsal
+content within the five-minute limit. The session's recording buttons are omitted
+from the movie. Render progress is in `renders/academy_export.log`.
+
+```sh
+./run_academy_viewer.command
+.venv/bin/python -m encino_waves academy-render renders/your_take/rehearsal.json renders/academy.mov
+```
+
+These renders are picture-only. Add the presenter's narration and a synchronized
+SRT or WebVTT file before submission; overlay text is not a closed-caption track.
+For a separate phone voice memo, start audio first and say a short sync cue while
+pressing R. Leave that cue in the original memo for alignment. The rendered
+timeline begins after the movie's one-second black head; account for that offset
+when adding narration and captions.
+Nimbus Sans Regular is bundled for presentation overlays, with its upstream
+license and attribution in `python/encino_waves/assets/fonts/`.
+
 For the 2048-wave / 1024-foam comparison scene with the fringe enabled:
 
 ```sh
