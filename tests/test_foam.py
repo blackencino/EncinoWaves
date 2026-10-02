@@ -172,7 +172,7 @@ def test_old_foam_checkpoints_preserve_rgb_and_discard_retired_streaks(version,t
 def test_old_scene_controls_preserve_lighting_and_foam_without_extra_layers():
     from encino_waves.render import Look
     look = Look(exposure=.7,aeration=1.25)
-    saved = dict(asdict(look),crest_foam=.8,crest_breakup=.6)
+    saved = dict(asdict(look),crest_foam=.8,crest_breakup=.6,crest_wrinkle=True)
     assert Look.from_dict(saved) == look
     p = Foam_parameters(emission=1.2,surface_half_life=1.5,diffusion=.56,exchange=.29)
     assert Foam_parameters.from_dict(dict(asdict(p),windrows=.9)) == p

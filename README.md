@@ -19,6 +19,20 @@ If this worktree shares another checkout's virtual environment, prefix the
 Python commands below with `PYTHONPATH=python` so they use this branch's source.
 The viewer launcher already does this.
 
+Rendering polish, the continuous Academy presentation, and the optional foam
+fringe are consolidated on `academy/gpu-showcase`. Use this checkout for the
+viewer; the separate visual-polish and crest-study worktrees have been retired.
+The geometric crest wrinkle is excluded.
+
+For the 2048-wave / 1024-foam comparison scene with the fringe enabled:
+
+```sh
+./run_viewer.command --scene scenes/foam_fringe.json
+```
+
+Compare **Off** and **Foam fringe** under **Camera & light → Crest treatment**.
+Space pauses for a matched comparison; treatment changes preserve foam history.
+
 For a fresh macOS or Linux checkout:
 
 ```sh

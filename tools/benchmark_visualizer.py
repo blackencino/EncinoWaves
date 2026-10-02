@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--resolution",type=int,default=1024)
     parser.add_argument("--domain",type=float,default=512.)
     parser.add_argument("--foam-resolution",type=int,default=512)
-    parser.add_argument("--crest-crumble",action="store_true",help="Compare the optional crest material to the approved look")
+    parser.add_argument("--crest-crumble",action="store_true",help="Compare the optional foam fringe to the approved look")
     parser.add_argument("--width",type=int,default=1920)
     parser.add_argument("--height",type=int,default=1080)
     parser.add_argument("--frames",type=int,default=30)

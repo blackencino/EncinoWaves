@@ -1,4 +1,4 @@
-"""Matched optional-crest-material review; waves and RGB history are shared."""
+"""Matched foam-fringe review; waves and RGB history are shared."""
 import argparse
 from dataclasses import asdict, replace
 import json
@@ -27,6 +27,8 @@ def main():
     parser.add_argument("--height",type=int,default=1080)
     parser.add_argument("--seconds",type=float,default=0.)
     parser.add_argument("--native-clips",action="store_true",help="Also save each side at the full evaluation resolution")
+    parser.add_argument("--viewer-mesh",action="store_true",help="Use the interactive viewer's 640 by 384 mesh")
+    parser.add_argument("--foam-strength",type=float,default=1.,help="Surface foam visibility")
     args=parser.parse_args()
     args.output.mkdir(parents=True,exist_ok=True)
     views=presentation_views(1000.)
@@ -40,8 +42,10 @@ def main():
         "close":(base,look_at((150.,-150.,28.),fov=48.)),
     }
     mesh_scale=max(1.,args.width/1920,args.height/1080)
-    renderer=Ocean_renderer(make_device(),mesh_resolution=(round(960*mesh_scale),round(576*mesh_scale)))
-    off,on=Look(),Look(crest_crumble=True)
+    mesh=(640,384) if args.viewer_mesh else (round(960*mesh_scale),round(576*mesh_scale))
+    renderer=Ocean_renderer(make_device(),mesh_resolution=mesh)
+    off=Look(foam=args.foam_strength)
+    on=replace(off,crest_crumble=True)
     results={}
     for name in args.cases:
         parameters,camera=cases[name]
@@ -87,13 +91,14 @@ def main():
                     Image.fromarray(candidate).save(folder/"crumble.png")
                     difference=np.abs(candidate.astype(np.int16)-baseline.astype(np.int16))[...,:3]
                     results[name]={"wave_resolution":args.resolution,"foam_resolution":args.foam_resolution,
-                        "image_size":[args.width,args.height],"mean_channel_difference":float(difference.mean()),
+                        "image_size":[args.width,args.height],"mesh_resolution":list(mesh),
+                        "mean_channel_difference":float(difference.mean()),
                         "max_channel_difference":int(difference.max()),
                         "changed_pixels_over_2_levels_percent":float(100*np.mean(difference.max(axis=-1)>2))}
                     print(name,results[name],flush=True)
                 if movie:
                     comparison=Image.new("RGB",(2560,760),(10,17,21))
-                    for column,(pixels,label) in enumerate(((baseline,"Approved"),(candidate,"Optional crest crumble"))):
+                    for column,(pixels,label) in enumerate(((baseline,"Off"),(candidate,"Foam fringe"))):
                         comparison.paste(Image.fromarray(pixels).convert("RGB").resize((1280,720),Image.Resampling.LANCZOS),(column*1280,40))
                         ImageDraw.Draw(comparison).text((column*1280+20,9),name+" | "+label,font=_font(22),fill="white")
                     movie.write(np.asarray(comparison))

@@ -32,10 +32,10 @@ class Look:
 
     @classmethod
     def from_dict(cls, values):
-        # The immediate crest overlay was added with the wind-streak experiment.
-        # Older scenes retain lighting settings while using the restored foam.
+        # Discard known retired appearance controls, including the separate
+        # geometric wrinkle study. Older scenes retain their other settings.
         return cls(**{name:value for name,value in values.items()
-                      if name not in {"crest_foam", "crest_breakup"}})
+                      if name not in {"crest_foam", "crest_breakup", "crest_wrinkle"}})
 
 
 @dataclass(frozen=True)

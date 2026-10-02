@@ -391,7 +391,7 @@ poorly commensurate two-domain experiment above.
 
 ## Presentation rendering
 
-The `academy/visual-polish` work changes rendering, secondary foam, and the
+The Academy presentation work changes rendering, secondary foam, and the
 separately requested trough appearance filter described above. The spectral
 wave formulation and phase evolution are unchanged. Fixed-state material
 comparisons use identical displacement, normal and foam arrays.
@@ -533,11 +533,15 @@ medians and p95 with an ordered four-byte GPU completion fence, outside the
 production path. NVIDIA hardware is not available here; the new shaders use the
 same portable wgpu path, without additional Metal-specific rendering code.
 
-### Optional crest-crumble experiment
+### Optional foam fringe
 
-The separate `academy/crest-crumble` branch adds an opt-in appearance study.
-`Look.crest_crumble` defaults to false; the viewer exposes one experimental
-checkbox. The approved presentation branch and its rendered master are unchanged.
+The foam fringe is consolidated with the rendering and UI work on
+`academy/gpu-showcase`. `Look.crest_crumble` defaults to false; the viewer's
+**Camera & light → Crest treatment** selector offers Off and Foam fringe.
+`scenes/foam_fringe.json` opens with it enabled at 2048 waves / 1024 foam.
+The geometric crest wrinkle was excluded. Imports ignore its retired setting
+so scenes saved during that study retain their other controls and foam history.
+The previously rendered Academy master is preserved without a new render.
 
 The first version was visually ineffective: a faint reflection perturbation
 retired beyond a 0.65 m pixel footprint. The revised material forms visible,
@@ -584,7 +588,8 @@ shallow, quiet and closer views, using identical frames/history on both sides.
 Each case includes a viewer scene with the requested grids and crumble enabled;
 open it with `./run_viewer.command --scene renders/<review>/<case>/scene.json`.
 The scene rebuilds its foam during playback; the matched clips use a six-second
-preroll shared by both sides.
+preroll shared by both sides. `--viewer-mesh` selects the actual 640 by 384
+interactive mesh; `--foam-strength` controls visibility for diagnostic renders.
 Each pair returns to the disabled look and checks pixel equality, reprimes a
 transient first-use draw if necessary, and rejects an unstable comparison.
 `tools/benchmark_visualizer.py --resolution 2048 --foam-resolution 1024
@@ -593,8 +598,8 @@ GPU regressions cover area conservation, narrow-crest sampling, unchanged RGB
 moments, extreme grain, paused source/wave edits, reuse, bounded light and
 bit-identical wave/foam inputs. The independent still review found the revised
 crest fragments legible in ordinary and sunset views and recommended the
-reduced opacity for close views. The checkbox remains off pending artistic
-review; the approved presentation branch and master have not been changed.
+reduced opacity for close views. The fringe remains optional; its staccato
+timing is an unresolved appearance limitation. Temporal refinement is deferred.
 
 On this M2 Max, a 40-frame paired 1080p / 4-sample benchmark with 2048 waves,
 1024 foam and a 1 km domain measured 28.43 ms median for the approved animated
