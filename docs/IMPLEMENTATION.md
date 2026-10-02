@@ -628,9 +628,10 @@ Populated RGB foam checkpoints also round-trip pixel-exactly; reset leaves the
 wave frame unchanged. Foam tests check periodic mass conservation and translation,
 seam diffusion, separate decay, shallow/deep exchange, retention after emission
 stops, pause behavior, reset conditions and replay at higher wave resolutions.
-The desktop window was reported as occluded
-by macOS during the final check; live mouse interaction still needs an unlocked,
-visible desktop. The window cancels before computing when occluded.
+The native presentation window also opened and rendered three frames on Metal
+after moving to the permanent worktree. Maya mouse and keyboard events are
+exercised programmatically by the offscreen UI check. The window cancels before
+computing when macOS reports it as occluded.
 
 The NVIDIA
 workstation is not accessible from this session. CUDA uses the same implementation
