@@ -35,7 +35,7 @@ try:
     pixels = np.asarray(canvas.draw())
     assert viewer.comparison_state is not None
     basis = viewer.basis
-    viewer.edit_parameters(wind_speed=24,depth=8,swell=.8)
+    viewer.edit_parameters(wind_speed=24,depth=8)
     for i in range(90):
         viewer.time += 1/60
         viewer._update_parameters(1/60)
@@ -45,12 +45,9 @@ try:
     assert viewer.state.parameters.depth == 8
     assert viewer.state.phase_steps
     assert viewer.comparison_state.phase is viewer.state.phase
-    viewer.foam_parameters=replace(viewer.foam_parameters,windrows=.45)
     viewer.foam_state=prepare_foam(viewer.state,viewer.time,viewer.foam_parameters,preroll=1)
     viewer.comparison_foam_state=prepare_foam(viewer.comparison_state,viewer.time,viewer.foam_parameters,preroll=1)
     assert float(viewer.foam_state.density.sum().cpu()) > 0
-    assert float(viewer.foam_state.windrows.sum().cpu()) > 0
-    assert viewer.comparison_foam_state.windrows is None  # The requested swell gate.
     foam_before=viewer.foam_state
     pixels = np.asarray(canvas.draw())
     Image.fromarray(pixels).save('renders/viewer_comparison.png')
@@ -94,32 +91,18 @@ try:
     after = viewer.renderer.render_image(480,270,viewer.camera,viewer.look,left_renderer=viewer.comparison_renderer)
     np.testing.assert_array_equal(before,after)
     assert float(viewer.foam_state.density.sum().cpu()) > 0
-    assert float(viewer.foam_state.windrows.sum().cpu()) > 0
-    # While paused, disabling streaks must hide existing history immediately,
-    # without touching the main RGB foam or re-running a wave inverse FFT.
-    density=viewer.foam_state.density
-    viewer.foam_parameters=replace(viewer.foam_parameters,windrows=0)
-    with patch('encino_waves.viewer.evaluate',side_effect=AssertionError('Streak controls recomputed waves')):
-        canvas.draw()
-    assert viewer.foam_state.windrows is None and viewer.foam_state.density is density
-    assert viewer.renderer.foam_state is viewer.foam_state
     wave_frame=viewer.renderer.frame
     viewer.reset_foam()
     canvas.draw()
     assert float(viewer.foam_state.density.sum().cpu()) == 0
     assert viewer.renderer.frame is wave_frame
     original_header = imgui.collapsing_header
-    original_tree = imgui.tree_node
     def expanded_header(label):
         imgui.set_next_item_open(True)
         return original_header(label)
     imgui.collapsing_header = expanded_header
-    def expanded_tree(label):
-        imgui.set_next_item_open(True)
-        return original_tree(label)
-    imgui.tree_node = expanded_tree
     canvas.draw()
-    print('Viewer UI, wave edits, rotation, RGB foam/streak replay/reset, Maya events, comparison, and all panels passed',flush=True)
+    print('Viewer UI, wave edits, rotation, RGB foam replay/reset, Maya events, comparison, and all panels passed',flush=True)
 finally:
     viewer.executor.shutdown(wait=True,cancel_futures=True)
     canvas.close()

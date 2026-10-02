@@ -249,8 +249,7 @@ explicit previous density and time; the synthesized wave state remains unchanged
 and history-independent. RGB stores nonnegative surface, shallow, and deep
 aeration densities in the ocean's undisplaced periodic coordinates. The mesh
 displacement carries this map along with the surface, and wind direction rotates
-the complete field. Optional wind streaks add a separate surface residue map
-with prescribed conservative transport, described below.
+the complete field. This version has no additional current/advection solver.
 
 Emission uses the original normalized negative minimum-eigenvalue crest map,
 with the same default 0.5–1.1 smooth threshold as the original shader. Calibration
@@ -280,59 +279,18 @@ surface density supplies a separate foam coverage layer. Dilute remnants become
 transparent rather than whitening the whole sea. Disabling persistent foam
 uses the original crest shading, with the original water constants.
 
-Fresh crest coverage is independently adjustable (default 0.15), with weaker
-breakup than emission (0.25). It uses the original normalized crest map and
-thresholds, then combines with history by coverage union, not additive light.
-Both layers share the softer foam lighting. The updated default surface half-life
+The default surface half-life
 is 1.5 s, diffusion 0.56 m²/s, exchange 0.29/s, and underwater strength 1.25;
 emission remains 1.2/s with full fractal breakup.
 
-### Wind streaks and deformation
-
-This experiment is deferred: the bands remain too regular, appear as soft lines
-with texture overlaid, and do not deform enough over time. The default amount is
-zero. The code and explicit preview/benchmark options remain for future study
-with better reference; the regular foam and fresh-crest shading are unchanged.
-
-`Foam_state.windrows` is an optional float32 surface residue field: another 1 MiB
-at 512², allocated only once the strong-sea gate opens. Its source is diverted
-from existing surface emission, so the total emitted amount is unchanged. The
-fraction is `0.08 * windrows * smoothstep(13.9,20.7,wind_speed) *
-smoothstep(0.5,0.8,swell)`. The experimental preview opts in at 0.45. Wind
-thresholds correspond to Beaufort 7–8, whose descriptions include wind-aligned
-foam streaks. The swell gate and strength are artistic choices, not a calibrated
-physical law. Langmuir convergence is another relevant mechanism; this model
-does not solve that fluid circulation.
-
-The residue drifts downwind at 1.5% of wind speed and gathers across the wind
-through a seeded, periodic, slightly irregular convergence field (default spacing
-32 m, gathering speed 0.35 m/s). These are prescribed appearance velocities;
-gathering is intentionally faster than many observed Langmuir currents. Positive
-conservative upwind fluxes transport density, including compression into bands,
-rather than merely backtracing a colour map. A CFL bound substeps transport for
-small domains / large maps. This introduces numerical diffusion; it is not an
-exact or resolution-independent fluid solve.
-
-Two broad periodic bends evolve slowly with different temporal frequencies.
-Their default combined amplitude is at most 2 m, their primary period 120 s,
-and their primary spatial wavelength approximately four streak spacings, at
-least 128 m when the domain allows it. The material velocity `dW/dt + u*dW/dx`
-warps existing residue on every update, not just the emission or final shading.
-Convergence follows the same bend. The flow and history both wrap across map
-edges. Setting the bend to zero disables this evolving deformation.
-
-Transport precedes mild diffusion (0.08 m²/s), a separate 45 s half-life, and new
-deposition. Below the wind/swell gate, existing residue continues moving and
-fading; setting Wind streaks to zero clears it immediately, even while paused.
-At display only, residue joins the surface component of the existing RGB map.
-The regular surface/shallow/deep history and all synthesized waves remain
-separate. A populated streak map is included in version 2 foam checkpoints;
-version 1 checkpoints still load without it. Rotation, reset, pause, and exact
-scene replay apply to both histories. Offline preroll is still six seconds by
-default; use a saved checkpoint or `--foam-preroll 60` for established streaks.
-
-References: [WHOI's observations of Langmuir convergence](https://uop.whoi.edu/techdocs/technote/9803tn.html)
-and the [National Weather Service Beaufort descriptions](https://www.weather.gov/pqr/beaufort).
+The wind-streak experiment and its extra immediate crest overlay have been
+removed. The emission, aging, breakup and foam shader are restored to `d390aea`,
+with the artist-selected defaults above. At identical wave fields and controls,
+the restored RGB history matches that implementation exactly on Metal. The
+four emission octaves and separate fine shader grain retain their original
+scales and weights. Version 1 and 2 checkpoints still load: only the RGB density
+is restored, and known retired appearance settings and windrow arrays are
+ignored. The experiment remains available in Git history (`cafc4cf`).
 
 On this M2 Max, synchronized foam update work measured approximately 2.2 ms with
 1024² waves and a 512² foam map, and 6.9 ms with 4096² waves and the same foam map
@@ -340,13 +298,6 @@ On this M2 Max, synchronized foam update work measured approximately 2.2 ms with
 and rendering. The higher wave resolution costs more in crest-source filtering;
 the history grid itself stays 512². `tools/benchmark_foam.py` measures this stage
 separately; `tools/foam_preview.py` renders an eight-second comparison.
-Those timings exclude the optional streak transport. Add `--streaks` to the
-benchmark to measure that path. With 4096² waves, 512² foam, and streaks enabled,
-the complete foam update measured 7.62 ms median / 7.82 ms p95 over 20 samples
-on the same M2 Max (excluding wave synthesis and graphics transfer/rendering).
-`tools/foam_detail_preview.py crests` and
-`tools/foam_detail_preview.py streaks` isolate the two new appearance layers on
-identical wave/foam history; the latter builds a minute of history first.
 
 The viewer resets on time scrubbing, backward/large time jumps, domain/seed/model
 changes, or cumulative large physical changes relative to the last reset:

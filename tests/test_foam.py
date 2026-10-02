@@ -1,5 +1,5 @@
 """History, periodic diffusion, depth exchange, checkpoints and wave isolation."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import math
 import numpy as np
@@ -7,8 +7,7 @@ import pytest
 import torch
 from encino_waves.model import Wave_parameters, Wave_frame, make_initial_state, evaluate
 from encino_waves.foam import (Foam_parameters, make_foam_state, step_foam, update_foam,
-    diffuse_and_decay, foam_reset_reason, save_foam, load_foam, prepare_foam, advance_foam_to, emission_mask,
-    windrow_activity, windrow_velocity, transport_windrows)
+    diffuse_and_decay, foam_reset_reason, save_foam, load_foam, prepare_foam, advance_foam_to, emission_mask)
 
 
 @pytest.fixture(params=("cpu","mps","cuda"))
@@ -99,126 +98,62 @@ def test_flat_display_crest_map_does_not_amplify_sub_texel_residuals(device):
 
 
 def test_foam_checkpoint_replays_and_survives_wave_resolution_change(device,tmp_path):
-    waves = make_initial_state(Wave_parameters(resolution=32,wind_speed=24,swell=.8),device)
-    p = Foam_parameters(resolution=32,windrows=.45)
+    waves = make_initial_state(Wave_parameters(resolution=32),device)
+    p = Foam_parameters(resolution=32)
     state = prepare_foam(waves,10,p,preroll=.2)
     repeated = prepare_foam(waves,10,p,preroll=.2)
     torch.testing.assert_close(state.density,repeated.density,atol=0,rtol=0)
-    torch.testing.assert_close(state.windrows,repeated.windrows,atol=0,rtol=0)
-    assert torch.count_nonzero(state.windrows) > 0
     path = tmp_path/"foam.npz"
     save_foam(path,state)
     loaded = load_foam(path,device)
     torch.testing.assert_close(state.density,loaded.density,atol=0,rtol=0)
-    torch.testing.assert_close(state.windrows,loaded.windrows,atol=0,rtol=0)
     a = advance_foam_to(state,waves,evaluate(waves,10.5),p)
     b = advance_foam_to(loaded,waves,evaluate(waves,10.5),p)
     torch.testing.assert_close(a.density,b.density,atol=0,rtol=0)
-    torch.testing.assert_close(a.windrows,b.windrows,atol=0,rtol=0)
     larger = make_initial_state(replace(waves.parameters,resolution=64),device)
     restored = prepare_foam(larger,10,p,path)
     torch.testing.assert_close(restored.density,state.density,atol=0,rtol=0)
-    torch.testing.assert_close(restored.windrows,state.windrows,atol=0,rtol=0)
 
 
-def test_windrow_transport_wraps_and_concentrates_without_creating_mass(device):
-    p = Foam_parameters(resolution=32,windrow_spacing=16)
-    waves = Wave_parameters(resolution=32,domain=32,wind_speed=24,swell=.8)
-    state = make_foam_state(waves,0,p,device)
-    dye = torch.zeros((32,32),device=device)
-    dye[0,-1] = 1
-    original = dye.clone()
-    moved = transport_windrows(dye,(1,torch.zeros_like(dye),0),1,.25)
-    assert float(moved[0,0].cpu()) == .25
-    assert float(moved[0,-1].cpu()) == .75
-    torch.testing.assert_close(dye,original,atol=0,rtol=0)
-    # Uniform residue must collect into bands: passive colour advection alone
-    # would keep it uniform and could not model the effect we want.
-    uniform = torch.ones_like(dye)
-    velocity = windrow_velocity(state.basis,0,p,waves.wind_speed)
-    collected = transport_windrows(uniform,velocity,.05,.25)
-    assert torch.isfinite(collected).all() and torch.all(collected >= 0)
-    assert float(collected.std().cpu()) > .1
-    torch.testing.assert_close(collected.sum(),uniform.sum(),rtol=2e-6,atol=2e-5)
-    assert torch.all(uniform == 1)
+@pytest.mark.parametrize("changes",({"resolution":100},{"diffusion":-1},{"emission":float("nan")},{"surface_half_life":0},{"breakup":2}))
+def test_invalid_foam_controls(changes):
+    with pytest.raises(ValueError): Foam_parameters(**changes)
 
 
-def test_low_frequency_warp_moves_existing_streaks_without_new_emission(device):
-    p = Foam_parameters(resolution=32,windrow_gathering=0,windrow_warp=2)
-    waves = Wave_parameters(resolution=32,domain=32,wind_speed=24,swell=.8)
-    state = make_foam_state(waves,0,p,device)
-    density = torch.zeros((32,32),device=device)
-    density[16,:] = 1
-    original = density.clone()
-    warped = density
-    still = density
-    for i in range(20):
-        velocity = windrow_velocity(state.basis,(i+.5)*.1,p,waves.wind_speed)
-        warped = transport_windrows(warped,velocity,1,.1)
-        velocity = windrow_velocity(state.basis,(i+.5)*.1,replace(p,windrow_warp=0),waves.wind_speed)
-        still = transport_windrows(still,velocity,1,.1)
-    torch.testing.assert_close(still,original,atol=1e-6,rtol=1e-6)
-    torch.testing.assert_close(density,original,atol=0,rtol=0)
-    torch.testing.assert_close(warped.sum(),original.sum(),atol=1e-5,rtol=2e-6)
-    centroid = (warped*torch.arange(32,device=device)[:,None]).sum(dim=0)
-    assert float(centroid.std().cpu()) > .05
-    # Time variation is slow, rather than independent random offsets per frame.
-    flow = windrow_velocity(state.basis,0,p,waves.wind_speed)[1]
-    soon = windrow_velocity(state.basis,.1,p,waves.wind_speed)[1]
-    later = windrow_velocity(state.basis,30,p,waves.wind_speed)[1]
-    assert float((soon-flow).abs().max().cpu()) < .02
-    assert float((later-flow).abs().max().cpu()) > .05
-
-
-def test_streaks_need_strong_wind_and_swell_and_fade_after_gate_closes(device):
-    p = Foam_parameters(resolution=32,breakup=0,windrows=.45)
-    strong = Wave_parameters(resolution=32,wind_speed=24,swell=.8)
-    for waves in (replace(strong,swell=.5),replace(strong,wind_speed=13.9)):
-        state = make_foam_state(waves,0,p,device)
-        assert step_foam(state,source(.1,device,parameters=waves)).windrows is None
-    state = make_foam_state(strong,0,p,device)
-    frame = source(.1,device,parameters=strong)
-    emitted = step_foam(state,frame)
-    # Windrow emission is taken from fresh surface foam, not added to the source.
-    total = emitted.density.mean(dim=(1,2)).sum()+emitted.windrows.mean()
-    torch.testing.assert_close(total,torch.tensor(p.emission*.1,device=device),atol=1e-7,rtol=1e-6)
-    eased = source(.2,device,parameters=replace(strong,swell=.5))
-    lingered = step_foam(emitted,eased)
-    expected = emitted.windrows.sum()*math.exp(-math.log(2)*.1/p.windrow_half_life)
-    torch.testing.assert_close(lingered.windrows.sum(),expected,atol=1e-6,rtol=2e-6)
-    assert step_foam(emitted,frame) is emitted
-    disabled = step_foam(emitted,frame,replace(p,windrows=0))
-    assert disabled.windrows is None and disabled.density is emitted.density
-    assert state.windrows is None and torch.count_nonzero(state.density) == 0
-
-
-def test_windrow_gate_is_continuous_and_monotonic():
-    p = Wave_parameters(wind_speed=24,swell=.8)
-    assert windrow_activity(p) == 1
-    assert windrow_activity(replace(p,swell=.5)) == 0
-    assert windrow_activity(replace(p,swell=.5+1e-4)) < 1e-6
-    for name,values in (("swell",np.linspace(.4,.9,20)),("wind_speed",np.linspace(12,24,20))):
-        activity = [windrow_activity(replace(p,**{name:v})) for v in values]
-        assert all(a <= b for a,b in zip(activity,activity[1:]))
-
-
-def test_old_checkpoint_without_windrow_history_loads(tmp_path):
-    state = make_foam_state(Wave_parameters(resolution=32),0,Foam_parameters(resolution=32),"cpu")
-    path = tmp_path/"foam.npz"
+@pytest.mark.parametrize("version",(1,2))
+def test_old_foam_checkpoints_preserve_rgb_and_discard_retired_streaks(version,tmp_path):
+    p = Foam_parameters(resolution=32,emission=1.8)
+    waves = Wave_parameters(resolution=32)
+    state = step_foam(make_foam_state(waves,0,p,"cpu"),source(.1,"cpu",parameters=waves))
+    path = tmp_path/"old_foam.npz"
     save_foam(path,state)
     with np.load(path,allow_pickle=False) as data:
         arrays = dict(data)
-    arrays["version"] = 1
-    saved = json.loads(str(arrays["parameters"]))
-    arrays["parameters"] = json.dumps({name:value for name,value in saved.items() if not name.startswith("windrow")})
+    arrays["version"] = version
+    if version == 2:
+        parameters = asdict(p)
+        parameters.update(windrows=.45,windrow_spacing=32,windrow_half_life=45,
+                          windrow_gathering=.35,windrow_warp=2,windrow_warp_period=120)
+        arrays["parameters"] = json.dumps(parameters)
+        arrays["windrows"] = np.full((32,32),100,np.float32)
     np.savez_compressed(path,**arrays)
     loaded = load_foam(path,"cpu")
-    assert loaded.windrows is None
-    torch.testing.assert_close(state.density,loaded.density,atol=0,rtol=0)
+    assert loaded.parameters == p
+    torch.testing.assert_close(loaded.density,state.density,atol=0,rtol=0)
+    torch.testing.assert_close(step_foam(loaded,source(.2,"cpu")).density,
+                               step_foam(state,source(.2,"cpu")).density,atol=0,rtol=0)
+    save_foam(path,loaded)
+    with np.load(path,allow_pickle=False) as data:
+        assert "windrows" not in data
+        assert "windrows" not in json.loads(str(data["parameters"]))
 
 
-@pytest.mark.parametrize("changes",({"resolution":100},{"diffusion":-1},{"emission":float("nan")},
-    {"surface_half_life":0},{"breakup":2},{"windrows":float("nan")},{"windrow_spacing":0},
-    {"windrow_gathering":-1},{"windrow_half_life":0},{"windrow_warp":-1},{"windrow_warp_period":0}))
-def test_invalid_foam_controls(changes):
-    with pytest.raises(ValueError): Foam_parameters(**changes)
+def test_old_scene_controls_preserve_lighting_and_foam_without_extra_layers():
+    from encino_waves.render import Look
+    look = Look(exposure=.7,aeration=1.25)
+    saved = dict(asdict(look),crest_foam=.8,crest_breakup=.6)
+    assert Look.from_dict(saved) == look
+    p = Foam_parameters(emission=1.2,surface_half_life=1.5,diffusion=.56,exchange=.29)
+    assert Foam_parameters.from_dict(dict(asdict(p),windrows=.9)) == p
+    with pytest.raises(TypeError): Look.from_dict(dict(saved,exposurre=1))
+    with pytest.raises(TypeError): Foam_parameters.from_dict(dict(asdict(p),emmisssion=1))

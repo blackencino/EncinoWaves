@@ -61,13 +61,12 @@ are adjustable in the panel.
 
 The defaults are emission **1.20**, surface lifetime **1.5 s**, breakup **1.00**,
 spreading **0.56 m²/s**, shallow-to-deep exchange **0.29/s**, and underwater
-bubbles **1.25**. **Fresh crests** adds a light immediate crest layer (0.15),
-with separate **Crest breakup** (0.25), alongside accumulated foam.
+bubbles **1.25**.
 
-The wind-streak experiment is deferred and **disabled by default**. The normal
-look uses accumulated foam and the light fresh-crest layer. In an existing
-session or saved scene with streaks enabled, set **Wind streaks** to **0** to
-clear just the streak history and keep the regular foam.
+Foam uses the appearance from before the wind-streak experiment. The experimental
+streak history and extra immediate crest overlay have been removed. Saved scenes
+keep their RGB foam history and active controls; retired layer settings and
+streak maps are ignored when loaded.
 
 Saved scenes include adjacent `.foam_state.npz` and, for comparisons,
 `.comparison_foam_state.npz` checkpoints. Keep these files beside their scene
@@ -192,7 +191,6 @@ are not a keyframed recording of the parameter controls.
 .venv/bin/python tools/benchmark_editing.py --resolution 1024 --frames 30
 .venv/bin/python tools/benchmark_foam.py --resolution 4096 --frames 30
 .venv/bin/python tools/foam_preview.py
-.venv/bin/python tools/foam_detail_preview.py crests
 ```
 
 On the NVIDIA workstation, use the corresponding virtual environment Python and
