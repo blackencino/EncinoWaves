@@ -29,6 +29,9 @@ class Foam_parameters:
     breakup: float = 1.0
     noise_scale: float = 24.0         # metres, rounded to a periodic cell count
     noise_speed: float = .12          # radians/second
+    emission_model: str = "compression"  # raw compression; legacy scenes keep normalized crests
+    compression_threshold: float = .75  # minimum principal horizontal stretch
+    compression_width: float = .15      # stretch interval from zero to full source
 
     @classmethod
     def from_dict(cls, values):
@@ -36,7 +39,11 @@ class Foam_parameters:
         # those known controls are discarded; misspelled active controls fail.
         retired = {"windrows", "windrow_spacing", "windrow_half_life",
                    "windrow_gathering", "windrow_warp", "windrow_warp_period"}
-        return cls(**{name:value for name,value in values.items() if name not in retired})
+        active={name:value for name,value in values.items() if name not in retired}
+        # Absence identifies a saved scene/checkpoint from before physical
+        # compression emission. Preserve its source and accumulated RGB history.
+        active.setdefault("emission_model","legacy")
+        return cls(**active)
 
     def __post_init__(self):
         n = self.resolution
@@ -50,6 +57,12 @@ class Foam_parameters:
                 raise ValueError(f"{name} must be finite and positive")
         if not math.isfinite(self.crest_start) or not 0 <= self.breakup <= 1:
             raise ValueError("crest threshold must be finite and breakup must be in [0, 1]")
+        if self.emission_model not in ("legacy", "compression"):
+            raise ValueError("foam emission model must be legacy or compression")
+        if not math.isfinite(self.compression_threshold) or not 0 <= self.compression_threshold <= 1:
+            raise ValueError("compression threshold must be in [0, 1]")
+        if not math.isfinite(self.compression_width) or not 0 < self.compression_width <= 1:
+            raise ValueError("compression width must be in (0, 1]")
 
 
 @dataclass(frozen=True)
@@ -122,6 +135,7 @@ def foam_reset_reason(state, waves, parameters):
     if (a.domain, a.seed) != (b.domain, b.seed): return "ocean patch or seed changed"
     if state.density.shape[-1] != parameters.resolution: return "foam resolution changed"
     if state.basis.noise_scale != parameters.noise_scale: return "foam pattern scale changed"
+    if state.parameters.emission_model != parameters.emission_model: return "foam emission model changed"
     for name in ("spectrum", "spreading", "dispersion", "convention", "gravity", "surface_tension", "density", "gamma"):
         if getattr(a, name) != getattr(b, name): return "wave model changed"
     for name, ratio in (("wind_speed",1.35), ("fetch_km",2.0), ("depth",2.0)):
@@ -135,12 +149,31 @@ def foam_reset_reason(state, waves, parameters):
 
 @torch.inference_mode()
 def emission_mask(frame, parameters, crest_gain=1.0, crest_bias=0.0):
-    # Match the actual crest texture used to calibrate the original shader.
-    # In a nearly flat sea, normalizing unquantized residuals by the half-float
-    # map's zero variance would otherwise manufacture widespread emission.
-    crest = frame.displacement[...,3].to(torch.float16).to(torch.float32)
-    crest = crest*crest_gain+crest_bias
-    mask = ((crest-parameters.crest_start)/parameters.crest_width).clamp(0,1)
+    """Return a source fraction, before history, optical coverage or breakup.
+
+    Compression uses the existing spectral crest field, not a new wave model:
+    lambda_min = 1 is undeformed, 0 is a singular horizontal cusp, and negative
+    values indicate folding. The default starts below .75 (25% principal
+    compression) and reaches full strength at .60. It ignores display statistics.
+
+    This is a breaking heuristic, not a measured whitecap fraction. Pinch is an
+    artist multiplier, the crest precedes spatial trough damping, and spectral
+    bandwidth changes compression. Tessendorf, Reinhardt and Gao (2020),
+    https://jtessen.people.clemson.edu/gilligan/html/whitecap_fraction.pdf,
+    discuss minimum-eigenvalue birth and empirical coverage calibration.
+    WaveWorks' 2015 War Thunder presentation uses the related determinant test;
+    its thresholds are not interchangeable with minimum-eigenvalue thresholds.
+    """
+    if parameters.emission_model == "compression":
+        minimum_stretch = -frame.displacement[...,3]
+        mask = ((parameters.compression_threshold-minimum_stretch)/parameters.compression_width).clamp(0,1)
+    else:
+        # Preserve the original half-float source and every legacy operation.
+        # Normalizing unquantized residuals by a flat display map's zero
+        # variance would otherwise manufacture widespread emission.
+        crest = frame.displacement[...,3].to(torch.float16).to(torch.float32)
+        crest = crest*crest_gain+crest_bias
+        mask = ((crest-parameters.crest_start)/parameters.crest_width).clamp(0,1)
     mask = mask*mask*(3-2*mask)
     n = parameters.resolution
     # Threshold before area filtering so narrow crests still emit at lower foam
@@ -249,11 +282,12 @@ def prepare_foam(waves, time, parameters, snapshot=None, preroll=6.0):
         if abs(state.time-time) < 1e-8 and not foam_reset_reason(state,waves.parameters,parameters):
             return replace(state, parameters=parameters)
     state = make_foam_state(waves.parameters,time-preroll,parameters,waves.device)
-    # Same crest source as the original shader, whose normalization is sampled
-    # once from the displayed half-float map, then held for this history.
-    crest=evaluate(waves,time).displacement[...,3].cpu().numpy().astype(np.float16).astype(np.float32)
-    gain=1/max(1e-8,2*float(np.std(crest)))
-    state=replace(state,crest_gain=gain,crest_bias=-float(np.mean(crest))*gain)
+    if parameters.emission_model == "legacy":
+        # Same crest source as the original shader, whose normalization is
+        # sampled once from the display map, then held for this history.
+        crest=evaluate(waves,time).displacement[...,3].cpu().numpy().astype(np.float16).astype(np.float32)
+        gain=1/max(1e-8,2*float(np.std(crest)))
+        state=replace(state,crest_gain=gain,crest_bias=-float(np.mean(crest))*gain)
     count = math.ceil(preroll*30)
     for i in range(count):
         t = time-preroll + (i+1)*preroll/count

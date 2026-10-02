@@ -93,7 +93,7 @@ def test_reset_policy_preserves_rotation_and_resets_large_edits(device):
 def test_flat_display_crest_map_does_not_amplify_sub_texel_residuals(device):
     frame=source(.1,device,crest=-1)
     frame.displacement[...,3]+=torch.linspace(-1e-6,1e-6,32,device=device)
-    mask=emission_mask(frame,Foam_parameters(resolution=32),crest_gain=1e8,crest_bias=1e8)
+    mask=emission_mask(frame,Foam_parameters(resolution=32,emission_model="legacy"),crest_gain=1e8,crest_bias=1e8)
     assert torch.count_nonzero(mask) == 0
 
 
