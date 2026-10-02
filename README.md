@@ -46,10 +46,11 @@ The controls have a short, 0.1-second response to smooth pointer motion. Domain,
 resolution and seed changes build a new wave basis. Space pauses propagation
 while leaving these controls live.
 
-**Trough damping** is on by default at **0.5**, its maximum. It restores the
+**Trough damping** is on by default at **0.5**, with a range of **0–1**. It restores the
 original spatial filter: the selected short-wave detail becomes quieter in the
-troughs while retaining at least half its amplitude. The original 1–4 m band and
-2 m transition are used. Toggle it or reduce the amount in **Resolution & model**;
+troughs, retaining at least half its amplitude at the default setting. At 1,
+the selected detail can be fully damped in the troughs. The original 1–4 m band and
+2 m transition are used. Toggle it or adjust the amount in **Resolution & model**;
 edits preserve the wave realization and phase. This is a production appearance
 filter applied after spectral synthesis. Older saved scenes retain their previous
 undamped surface until it is enabled explicitly.

@@ -20,9 +20,10 @@ def basis(request):
     return make_wave_basis(Wave_parameters(resolution=128, domain=64), device)
 
 
-def test_trough_port_against_double_precision_fftw(basis):
+@pytest.mark.parametrize("amount", (.5, 1))
+def test_trough_port_against_double_precision_fftw(basis, amount):
     fftw = pytest.importorskip("pyfftw.interfaces.numpy_fft")
-    state = state_from_basis(basis, basis.parameters)
+    state = state_from_basis(basis, replace(basis.parameters,trough_damping=amount))
     p = state.parameters
     time = 12.5
     h = spectral_height(state, time)
@@ -57,20 +58,22 @@ def test_trough_port_against_double_precision_fftw(basis):
     np.testing.assert_allclose(frame.normal[...,:3].cpu(),normals,atol=4e-6,rtol=3e-5)
 
 
-def test_trough_mask_damps_troughs_and_retains_half_the_detail(basis):
+def test_trough_mask_damps_troughs_with_requested_strength(basis):
     x = torch.arange(128, device=basis.device)*2*math.pi/128
     # A long-wave ridge: the crest guide grows on the compressed crest and is
     # flat on the expanded trough, as ComputeMinE in the original C++ code.
     guide = (-1+torch.cos(x).clamp_min(0))[None,:].expand(128,-1)
-    weight = trough_retention(guide, .5)
-    assert float(weight.min()) >= .5 and float(weight.max()) <= 1
-    assert float(weight[0,64]) == .5
-    assert float(weight[0,0]) > .9
-    torch.testing.assert_close(trough_retention(torch.ones_like(guide),.5),torch.ones_like(guide))
+    for amount in (.5, 1):
+        weight = trough_retention(guide, amount)
+        assert float(weight.min()) >= 1-amount and float(weight.max()) <= 1
+        assert float(weight[0,64]) == 1-amount
+        assert float(weight[0,0]) > 1-.2*amount
+        torch.testing.assert_close(trough_retention(torch.ones_like(guide),amount),torch.ones_like(guide))
 
 
-def test_spatial_edits_reuse_spectrum_and_preserve_foam_source(basis, tmp_path):
-    state = state_from_basis(basis, basis.parameters)
+@pytest.mark.parametrize("amount", (.5, 1))
+def test_spatial_edits_reuse_spectrum_and_preserve_foam_source(basis, tmp_path, amount):
+    state = state_from_basis(basis, replace(basis.parameters,trough_damping=amount))
     state = edit_state(basis, state, replace(state.parameters,depth=5), 10)
     frame = evaluate(state, 12)
     with patch("encino_waves.editing.state_from_basis", side_effect=AssertionError("Rebuilt spectral state")):
@@ -80,7 +83,7 @@ def test_spatial_edits_reuse_spectrum_and_preserve_foam_source(basis, tmp_path):
     unfiltered = evaluate(off,12)
     assert not torch.equal(frame.displacement[...,:3], unfiltered.displacement[...,:3])
     torch.testing.assert_close(frame.displacement[...,3], unfiltered.displacement[...,3], atol=0, rtol=0)
-    halfway = evaluate(replace(state,parameters=replace(state.parameters,trough_damping=.25)),12)
+    halfway = evaluate(replace(state,parameters=replace(state.parameters,trough_damping=amount/2)),12)
     torch.testing.assert_close(halfway.displacement[...,:3],
                                .5*(frame.displacement[...,:3]+unfiltered.displacement[...,:3]),
                                atol=1e-6,rtol=2e-6)
@@ -115,7 +118,7 @@ def test_saved_pre_trough_ocean_retains_its_surface(tmp_path):
     torch.testing.assert_close(evaluate(loaded,12).displacement,evaluate(state,12).displacement,atol=0,rtol=0)
 
 
-@pytest.mark.parametrize("changes", ({"trough_damping":.51},{"trough_damping":-1},
+@pytest.mark.parametrize("changes", ({"trough_damping":1.01},{"trough_damping":-1},
     {"trough_damping":float("nan")},{"trough_small_wavelength":0},
     {"trough_big_wavelength":.5},{"trough_soft_width":0}))
 def test_trough_parameter_limits(changes):

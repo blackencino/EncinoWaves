@@ -414,7 +414,7 @@ class Viewer:
         imgui.set_next_item_width(-1)
         flags=imgui.SliderFlags_.logarithmic if log else 0
         changed,value=imgui.slider_float("##"+name,getattr(self.parameters,name),lo,hi,fmt,flags)
-        if name == "trough_damping": value=min(.5,max(0,value))
+        if name == "trough_damping": value=min(1,max(0,value))
         if changed: self.edit_parameters(**{name:value})
         if imgui.is_item_hovered(): imgui.set_tooltip(help_text)
 
@@ -514,9 +514,9 @@ class Viewer:
             self._slider("Pinch","pinch",-3,3,"%.2f","Horizontal displacement; the original artist control.")
             changed,value=imgui.checkbox("Trough damping",self.parameters.trough_damping > 0)
             if changed: self.edit_parameters(trough_damping=.5 if value else 0.0)
-            if imgui.is_item_hovered(): imgui.set_tooltip("Quiet short-wave detail in the troughs. Maximum reduction is half its amplitude.")
+            if imgui.is_item_hovered(): imgui.set_tooltip("Quiet short-wave detail in the troughs. Defaults to half strength.")
             if self.parameters.trough_damping > 0:
-                self._slider("Damping amount","trough_damping",0,.5,"%.2f","Original spatial trough filter. 0 is off; 0.5 retains at least half the selected detail.")
+                self._slider("Damping amount","trough_damping",0,1,"%.2f","0 is off; 0.5 is the default; 1 fully damps the selected detail in the troughs.")
             changed,value=imgui.input_int("Seed",self.parameters.seed)
             if changed: self.edit_parameters(seed=value%2**32)
             imgui.text_wrapped(f"{self.device.adapter.info['device']} / {self.state.device}")

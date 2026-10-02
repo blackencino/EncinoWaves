@@ -25,7 +25,7 @@ try:
     Image.fromarray(pixels).save('renders/viewer_ui.png')
     assert viewer.parameters.trough_damping == .5
     initial_coefficients=viewer.state.h_positive
-    for amount in (0,.5):
+    for amount in (0,1,.5):
         viewer.edit_parameters(trough_damping=amount)
         with patch('encino_waves.editing.state_from_basis',side_effect=AssertionError('Damping rebuilt the spectrum')):
             for i in range(120): viewer._update_parameters(1/60)

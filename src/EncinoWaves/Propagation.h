@@ -544,7 +544,7 @@ void Propagation<T>::propagate(const Parameters<T> &i_params,
     F.BiasMinE = -stats.MeanMinE / (T(2) * stats.StdDevMinE);
     F.MinClipE = 0.0;
     F.MaxClipE = 1.1;
-    F.MinInterpolant = T(1) - Imath::clamp(i_params.troughDamping, T(0), T(0.5));
+    F.MinInterpolant = T(1) - Imath::clamp(i_params.troughDamping, T(0), T(1));
     F.MinE_And_Interpolant = FiltMinE.data();
     // CJH HACK
     tbb::parallel_for(

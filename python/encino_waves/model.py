@@ -59,8 +59,8 @@ class Wave_parameters:
                 raise ValueError(f"{name} must be finite")
         if not -1 <= self.swell <= 2:
             raise ValueError("swell must be in [-1, 2]")
-        if not 0 <= self.trough_damping <= .5:
-            raise ValueError("trough_damping must be in [0, 0.5]")
+        if not 0 <= self.trough_damping <= 1:
+            raise ValueError("trough_damping must be in [0, 1]")
         if self.trough_small_wavelength > self.trough_big_wavelength:
             raise ValueError("trough wavelength band must be ordered")
         if self.surface_tension < 0 or self.amplitude_gain < 0:

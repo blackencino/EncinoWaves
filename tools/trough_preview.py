@@ -1,4 +1,4 @@
-"""Compare the same sea with trough damping off and at its 0.5 cap."""
+"""Compare the same sea with trough damping off and at its 0.5 default."""
 from dataclasses import replace
 from pathlib import Path
 import argparse

@@ -223,7 +223,7 @@ alone is not established, because of the stochastic stream distinction above.
 
 `trough.py` ports the active trough-damping path in the original
 `src/EncinoWaves/Propagation.h` and `Filter.h`. It is enabled at 0.5 by default;
-both the GPU implementation and maintained C++ path cap the reduction at 0.5.
+both the GPU implementation and maintained C++ path allow amounts from 0 to 1.
 This is a separate production appearance filter, not an alteration of the
 paper's spectrum or a claim that the spatially modified result has the same PSD.
 
@@ -235,7 +235,8 @@ the original fixed positive pinch of 1.25 even when displayed pinch is zero.
 With `z = (guide - mean(guide)) / (2.2 * std(guide))`, the retention is
 `1 - amount + amount * smoothstep(0, 1, z)`. Height and horizontal displacement
 are `filtered + retention * (original - filtered)`. The selected detail retains
-between 50% and 100% of its amplitude at maximum strength.
+between 50% and 100% of its amplitude at the 0.5 default, and between 0% and 100%
+at maximum strength (1).
 
 As in the original active C++ path, the emission crest map is preserved. Normals
 are computed from the final displaced points, so they include the spatial blend's
