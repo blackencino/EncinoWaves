@@ -394,12 +394,15 @@ foam uses the full sky. The direct beam uses refracted rays, entry flux projecti
 Beer attenuation, normalized Henyey–Greenstein scattering and the radiance
 conversion back to air. Reflection and transmission remain nonnegative.
 
-The ambient body term (`0.33 * sky_irradiance * scattering_albedo`) is a calibrated
+The ambient body term (`0.25 * sky_irradiance * scattering_albedo`) is a tuned
 multiple-scattering approximation. The viewer does not solve transport through
 the two faces of a thin crest, reflect other scene objects, or simulate underwater
 caustics. Clear-water absorption/scattering and bubble extinction are explicit
 material choices; the ocean spectrum is not recolored or reshaped to improve a
-shot. Foam can legitimately be darker than a strong specular glint.
+shot. The water material uses subdued blue-green absorption/scattering, with
+reduced bubble return. Surface foam has diffuse reflectance 0.72–0.86 before its
+small mean-one detail modulation; it remains illuminated by the sky. Foam can
+legitimately be darker than a strong specular glint.
 
 `environment.py` creates a separate 1024x512 GGX-prefiltered panorama on the GPU
 at sky load time. Its mip levels encode perceptual roughness, using importance
@@ -585,13 +588,14 @@ and rendering. The higher wave resolution costs more in crest-source filtering;
 the history grid itself stays 512². `tools/benchmark_foam.py` measures this stage
 separately; `tools/foam_preview.py` renders an eight-second comparison.
 
-The viewer resets on time scrubbing, backward/large time jumps, domain/seed/model
-changes, or cumulative large physical changes relative to the last reset:
-wind speed ratio >1.35, fetch/depth ratio >2, swell change >0.35, or pinch change
->0.3. It also provides an explicit Reset foam button. Direction, camera, sky and
-wave resolution preserve history; changing foam resolution or noise scale resets
-it. Paused frames do not decay or deposit again. Each comparison sea has its own
-history under matched controls.
+The viewer resets on time scrubbing, backward/large time jumps, domain/seed changes,
+or a discrete wave-model change. Continuous physical edits retain history regardless
+of magnitude: wind, fetch, depth, swell, pinch and other numeric wave settings.
+Presets on the same patch use the normal continuous-edit path, retaining phases
+and foam. An explicit Reset foam button remains available. Direction, camera, sky
+and wave resolution preserve history; changing the foam resolution, pattern basis
+or source algorithm resets it. Paused frames do not decay or deposit again.
+Each comparison sea has its own history under matched controls.
 
 Scene JSON references lossless float32 NPZ checkpoints beside the JSON, including
 time, calibration, foam controls and the reference sea. Noise is regenerated from

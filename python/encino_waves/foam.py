@@ -129,21 +129,17 @@ def make_foam_state(waves, time, parameters=Foam_parameters(), device="auto"):
 
 
 def foam_reset_reason(state, waves, parameters):
-    """Compare to the sea at the last reset, so many small edits can add up."""
+    """Reset incompatible coordinates or discrete models, not physical edits."""
     if state is None: return "initialization"
     a, b = state.reference_parameters, waves
     if (a.domain, a.seed) != (b.domain, b.seed): return "ocean patch or seed changed"
     if state.density.shape[-1] != parameters.resolution: return "foam resolution changed"
     if state.basis.noise_scale != parameters.noise_scale: return "foam pattern scale changed"
     if state.parameters.emission_model != parameters.emission_model: return "foam emission model changed"
-    for name in ("spectrum", "spreading", "dispersion", "convention", "gravity", "surface_tension", "density", "gamma"):
+    for name in ("spectrum", "spreading", "dispersion", "convention"):
         if getattr(a, name) != getattr(b, name): return "wave model changed"
-    for name, ratio in (("wind_speed",1.35), ("fetch_km",2.0), ("depth",2.0)):
-        if max(getattr(a,name)/getattr(b,name), getattr(b,name)/getattr(a,name)) > ratio:
-            return "sea conditions changed"
-    if abs(a.swell-b.swell) > .35 or abs(a.pinch-b.pinch) > .3:
-        return "wave shape changed"
-    # Mesh orientation and wave resolution do not invalidate ocean-space foam.
+    # Foam remembers prior sea conditions. Any size of continuous physical edit,
+    # mesh orientation change or wave resolution change retains that history.
     return None
 
 

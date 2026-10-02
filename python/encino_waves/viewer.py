@@ -124,8 +124,8 @@ class Viewer:
         self.parameters,self.camera,self.look=scene.parameters,scene.camera,scene.look
         self.last_update=time.perf_counter()
         self.changed=True
-        self.reset_requested=True
-        self.reset_foam()
+        # A preset on the same patch follows the ordinary physical-edit path.
+        # New domains/seeds rebuild the basis and invalidate foam when applied.
 
     def reset_foam(self):
         self.foam_state=None
@@ -499,7 +499,7 @@ class Viewer:
                 if self.foam_parameters.resolution not in sizes: sizes=sorted(sizes+[self.foam_parameters.resolution])
                 changed,index=imgui.combo("Foam map",sizes.index(self.foam_parameters.resolution),[str(n) for n in sizes])
                 if changed: self.foam_parameters=replace(self.foam_parameters,resolution=sizes[index])
-                imgui.text_wrapped("Major sea changes and time scrubbing clear foam history.")
+                imgui.text_wrapped("Physical edits keep foam history. New patches, seeds, models and time scrubbing clear it.")
                 imgui.tree_pop()
         expanded=imgui.collapsing_header("Camera & light")
         if expanded:

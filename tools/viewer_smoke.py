@@ -100,6 +100,18 @@ try:
     after = viewer.renderer.render_image(480,270,viewer.camera,viewer.look,left_renderer=viewer.comparison_renderer)
     np.testing.assert_array_equal(before,after)
     assert float(viewer.foam_state.density.sum().cpu()) > 0
+    histories=(viewer.foam_state,viewer.comparison_foam_state)
+    viewer.edit_parameters(wind_speed=3,fetch_km=1,depth=600,swell=1,pinch=.2)
+    for i in range(120): viewer._update_parameters(1/60)
+    canvas.draw()
+    assert viewer.foam_state is histories[0]
+    assert viewer.comparison_foam_state is histories[1]
+    viewer.select_scene(2)  # Same patch and seed: retain phase and foam history.
+    for i in range(120): viewer._update_parameters(1/60)
+    canvas.draw()
+    assert viewer.state.phase_steps
+    assert viewer.foam_state is histories[0]
+    assert viewer.comparison_foam_state is histories[1]
     wave_frame=viewer.renderer.frame
     viewer.reset_foam()
     canvas.draw()

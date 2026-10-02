@@ -74,14 +74,31 @@ def test_emission_has_history_and_does_not_change_wave_fields(device):
     assert step_foam(emitted,frame) is emitted  # Paused drawing cannot deposit twice.
 
 
-def test_reset_policy_preserves_rotation_and_resets_large_edits(device):
+def test_large_physical_edits_keep_existing_foam_and_its_age(device):
     p = Foam_parameters(resolution=32)
     waves = Wave_parameters(resolution=32)
     state = make_foam_state(waves,0,p,device)
     state = step_foam(state,source(.1,device))
-    for changes in ({"wind_direction":127},{"resolution":64},{"wind_speed":18},{"depth":95}):
-        assert foam_reset_reason(state,replace(waves,**changes),p) is None
-    for changes in ({"seed":8},{"domain":100},{"depth":3},{"wind_speed":30},{"swell":1},{"spreading":"donelan_banner"}):
+    for changes in ({"wind_direction":127},{"resolution":64},{"wind_speed":3},
+                    {"wind_speed":45},{"fetch_km":1},{"fetch_km":5000},
+                    {"depth":3},{"depth":1000},{"swell":1},{"pinch":0},
+                    {"gamma":7},{"gravity":8},{"surface_tension":.05},{"density":900}):
+        changed=replace(waves,**changes)
+        assert foam_reset_reason(state,changed,p) is None
+        # Editing while paused must preserve the actual map, not replace it
+        # with a fresh state that starts accumulating again on the next frame.
+        assert update_foam(state,source(.1,device,crest=-1,parameters=changed),p) is state
+        continued=update_foam(state,source(.2,device,crest=-1,parameters=changed),p)
+        assert continued.basis is state.basis and continued.time == .2
+        assert 0 < continued.density[0].sum() < state.density[0].sum()
+
+
+def test_discrete_changes_and_time_jumps_reset_foam(device):
+    p = Foam_parameters(resolution=32)
+    waves = Wave_parameters(resolution=32)
+    state = step_foam(make_foam_state(waves,0,p,device),source(.1,device))
+    for changes in ({"seed":8},{"domain":100},{"spreading":"donelan_banner"},
+                    {"spectrum":"jonswap"},{"dispersion":"deep"},{"convention":"legacy_2015"}):
         frame = source(.2,device,parameters=replace(waves,**changes))
         reset = update_foam(state,frame,p)
         assert reset.time == .2 and torch.count_nonzero(reset.density) == 0
@@ -113,6 +130,10 @@ def test_foam_checkpoint_replays_and_survives_wave_resolution_change(device,tmp_
     larger = make_initial_state(replace(waves.parameters,resolution=64),device)
     restored = prepare_foam(larger,10,p,path)
     torch.testing.assert_close(restored.density,state.density,atol=0,rtol=0)
+    # The saved foam can belong to very different earlier sea conditions.
+    calmer = make_initial_state(replace(larger.parameters,wind_speed=3,fetch_km=1,depth=2,swell=1),device)
+    retained = prepare_foam(calmer,10,p,path)
+    torch.testing.assert_close(retained.density,state.density,atol=0,rtol=0)
 
 
 @pytest.mark.parametrize("changes",({"resolution":100},{"diffusion":-1},{"emission":float("nan")},{"surface_half_life":0},{"breakup":2}))

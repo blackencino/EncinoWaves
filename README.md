@@ -81,8 +81,9 @@ source naturally. This is a breaking heuristic, not a calibrated Beaufort model.
 The advanced settings retain **Original crests** for comparison and older scenes.
 
 Foam builds during playback; pausing freezes its history. **Reset foam** clears
-it without restarting the waves. Large physical edits, a new patch/seed, and
-time scrubbing also clear history. Rotating the ocean rotates the existing foam.
+it without restarting the waves. Physical edits retain the foam from previous
+conditions, however large the change. A new patch/seed, discrete model changes,
+and time scrubbing clear history. Rotating the ocean rotates the existing foam.
 The map defaults to 512² independently of wave resolution, with options through
 2048². Surface lifetime is adjustable in the panel; emission, underwater strength,
 breakup, spreading, exchange and the source algorithm are in **Advanced foam**.

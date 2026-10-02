@@ -190,12 +190,14 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
     let deep_air=1.0-exp(-density.b*u.aeration.y);
     // Absorption/scattering are in inverse metres; added bubbles increase both
     // scattering and extinction, keeping the single-scattering albedo bounded.
-    let sigma_a=vec3f(.22,.045,.018);
-    let sigma_s=vec3f(.006,.010,.009)+vec3f(1.2)*shallow+vec3f(.22)*deep_air;
+    // A subdued blue-green body under the reflected sky. Bubbles lighten this
+    // medium without overwhelming the surface reflection with a cyan veil.
+    let sigma_a=vec3f(.22,.075,.065);
+    let sigma_s=vec3f(.010,.018,.016)+vec3f(.6)*shallow+vec3f(.1)*deep_air;
     let sigma_t=sigma_a+sigma_s;
     let albedo=sigma_s/sigma_t;
     let ambient=sky_light(normalize(vec3f(normal.xy*.25,1.0)),true);
-    var body=.33*ambient*albedo;
+    var body=.25*ambient*albedo;
     let sun=normalize(u.sun.xyz);
     let nl=clamp(dot(normal,sun),0.0,1.0);
     if nl>0.0 {
@@ -233,14 +235,14 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
         let resolved_roughness=mix(.6,.32,fresh);
         let foam_roughness=min(.9,pow(pow(resolved_roughness,4.0)+.5*foam_detail_variance(detail),.25));
         let foam_reflectance=environment_brdf(dot(foam_normal,view),foam_roughness);
-        let foam_albedo=mix(.58,.68,fresh)*detail.b;
+        let foam_albedo=mix(.72,.86,fresh)*detail.b;
         let foam_light=(1.0-foam_reflectance)*foam_albedo*sky_irradiance(foam_normal)
             +foam_reflectance*filtered_reflection(reflect(-view,foam_normal),foam_roughness);
         color=mix(color,foam_light,coverage);
     } else if u.ocean.z<u.statistics.w {
         let crest=textureSample(displacements,wave_sampler,in.uv).w*u.statistics.y+u.statistics.z;
         let coverage=smoothstep(u.ocean.z,u.statistics.w,crest)*u.ocean.w;
-        color=mix(color,.65*sky_irradiance(normal),coverage);
+        color=mix(color,.82*sky_irradiance(normal),coverage);
     }
     return vec4f(atmosphere(color,in.world,-view),1.0);
 }
