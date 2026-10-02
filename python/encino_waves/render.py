@@ -28,6 +28,7 @@ class Look:
     crest_maximum: float = 1.1
     aeration: float = 1.25
     material: str = "physical"
+    crest_crumble: bool = False
 
     @classmethod
     def from_dict(cls, values):
@@ -403,6 +404,9 @@ class Ocean_renderer:
         # so even a very bright HDR sun remains recoverable at low exposure.
         hdr_scale = max(1.0,self.sky_peak*look.sky_gain/32000) if physical else 1.0
         lighting_gain = look.sky_gain/hdr_scale
+        foam_parameters = self.foam_state.parameters if self.foam_state is not None else None
+        crest_crumble = bool(look.crest_crumble and foam_parameters is not None
+                             and foam_parameters.emission_model == "compression")
         uniform = np.array([
             [camera.x,camera.y,camera.height,self.frame.time],
             [*forward,math.tan(math.radians(camera.fov)/2)],
@@ -413,8 +417,10 @@ class Ocean_renderer:
             [*self.mesh_resolution,.5,30000],
             [self.big_height,self.crest_gain,self.crest_bias,look.crest_maximum],
             [*(self.moon_color*look.sky_gain),0],
-            [float(self.foam_state is not None),look.aeration,0,0],
-            [.025,float(self.reflection_texture.mip_level_count-1),20000,0],
+            [float(self.foam_state is not None),look.aeration,float(crest_crumble),
+             foam_parameters.compression_threshold if foam_parameters else .75],
+            [.025,float(self.reflection_texture.mip_level_count-1),20000,
+             foam_parameters.compression_width if foam_parameters else .15],
             *[[*(coefficient*lighting_gain),0] for coefficient in self.lighting.diffuse_sh],
             *[[*(coefficient*lighting_gain),0] for coefficient in self.lighting.ambient_sh],
         ],np.float32)

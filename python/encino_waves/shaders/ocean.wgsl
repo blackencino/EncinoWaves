@@ -11,8 +11,8 @@ struct Uniforms {
     grid: vec4f,         // x segments, y segments, near distance, far distance
     statistics: vec4f,   // big height, crest gain, crest bias, max crest
     moon_color: vec4f,
-    aeration: vec4f,      // use foam history, subsurface strength, unused, unused
-    optics: vec4f,        // unresolved RMS slope, max environment mip, visibility metres, unused
+    aeration: vec4f,      // use foam history, subsurface strength, crest crumble, compression threshold
+    optics: vec4f,        // unresolved RMS slope, max environment mip, visibility metres, compression width
     diffuse_sh: array<vec4f,9>, // cosine-convolved radiance, already divided by pi
     ambient_sh: array<vec4f,9>, // same, with the compact direct source removed
 };
@@ -299,6 +299,33 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
         let foam_albedo=mix(.72,.86,fresh)*detail.b;
         let foam_light=(1.0-foam_reflectance)*foam_albedo*sky_irradiance(foam_normal)
             +foam_reflectance*filtered_reflection(reflect(-view,foam_normal),foam_roughness);
+        if u.aeration.z>.5 {
+            // Optional, transient breaking material. Start just before the
+            // persistent emitter (.75), without changing that source/history.
+            let minimum_stretch=-textureSample(displacements,wave_sampler,in.uv).w;
+            let onset=min(1.0,u.aeration.w+min(.05,.5*u.optics.w));
+            let breaking=1.0-smoothstep(u.aeration.w-u.optics.w,onset,minimum_stretch);
+            let metres=in.uv*u.ocean.x;
+            let pixel_metres=max(length(dpdx(metres)),length(dpdy(metres)));
+            // Keep the existing centimetre-scale relief in world units. When
+            // unresolved, retire this small effect rather than drawing bands.
+            let resolved=1.0-smoothstep(.12,.65,pixel_metres);
+            let micro=vec4f(detail.xy*.9,detail.z,detail.w*.81);
+            var breaking_normal=foam_detail_normal(normal,micro,u.environment.w);
+            if dot(breaking_normal,view)<0.0 { breaking_normal=reflect(breaking_normal,view); }
+            breaking_normal=normalize(breaking_normal+view*1e-5);
+            let breaking_roughness=min(.9,pow(pow(roughness,4.0)+.5*foam_detail_variance(micro),.25));
+            let breaking_reflectance=environment_brdf(dot(breaking_normal,view),breaking_roughness);
+            let wet=breaking_reflectance*filtered_reflection(reflect(-view,breaking_normal),breaking_roughness)
+                +(1.0-breaking_reflectance)*body;
+            let edge_width=min(.02,fwidth(detail.b));
+            let fragments=smoothstep(1.018-edge_width,1.045+edge_width,detail.b);
+            let fringe=.12*fragments*resolved;
+            let crumbled=mix(wet,foam_light,fringe);
+            color=mix(color,crumbled,.75*breaking*resolved*clamp(u.ocean.w,0.0,1.0));
+        }
+        // The approved foam material covers the transient layer, so its
+        // contribution is automatically multiplied by 1 - existing coverage.
         color=mix(color,foam_light,coverage);
     } else if u.ocean.z<u.statistics.w {
         let crest=textureSample(displacements,wave_sampler,in.uv).w*u.statistics.y+u.statistics.z;

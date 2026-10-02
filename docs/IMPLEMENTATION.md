@@ -533,6 +533,50 @@ medians and p95 with an ordered four-byte GPU completion fence, outside the
 production path. NVIDIA hardware is not available here; the new shaders use the
 same portable wgpu path, without additional Metal-specific rendering code.
 
+### Optional crest-crumble experiment
+
+The separate `academy/crest-crumble` branch adds an opt-in appearance study.
+`Look.crest_crumble` defaults to false; the viewer exposes one experimental
+checkbox. The approved presentation branch and its rendered master are unchanged.
+
+This samples the existing raw minimum horizontal stretch and begins slightly
+before the configured compression emitter. With the default source, onset is
+0.80 and full weight is 0.60, compared with deposition's 0.75/0.60. It is an
+instantaneous, reversible compression cue, not a detected one-way breaking event.
+Legacy emission cannot enable it. No spectrum, displacement, normal field,
+emission, RGB history, reset policy, FFT, texture allocation or transfer changes.
+
+The existing 6/16/42 cm material detail perturbs a separate wet reflection normal
+and roughness. Slope variance is scaled by the square of the normal amplitude;
+the reflection normal receives the same view-facing correction as the main water.
+Body lighting and established foam retain their original normals and shading.
+A sparse pale fringe uses the existing sky-lit foam radiance, with at most 9%
+blend on uncovered water. It is neither emission nor additive white. Applying
+the approved foam last automatically suppresses both additions by its coverage.
+
+Newly thresholded fringe coverage is not correctly filtered just because its
+input texture has mipmaps. This small prototype retires the effect as the pixel
+footprint grows from 0.12 to 0.65 metres, rather than widening its features or
+whitening the horizon. A visible distant fringe would need separate coverage
+integration and is outside this experiment. There is no scrolling or per-frame
+randomization. This suggests wet crinkling on the surface, not airborne spray
+or a crumbling silhouette.
+
+`tools/review_crest_crumble.py --seconds 4` generates matched native 4K stills and
+short paired clips for ordinary, chaotic, ordered, shallow, quiet and closer
+views, using exactly the same wave frames and foam history on both sides.
+Each pair returns to the disabled look and checks pixel equality, reprimes a
+transient first-use draw if necessary, and rejects an unstable comparison.
+GPU regressions check confinement to resolved compression, preservation of
+covered foam, configured-source thresholds, disabled appearance, bounded light,
+and bit-identical wave/foam inputs. The effect remains off pending artistic review;
+subtle numerical differences alone are not evidence of a better presentation.
+The independent still review found no clear improvement at the presentation
+cameras: the closer view adds faint granular shading, without a distinctly
+crumbling crest. It recommended keeping the approved render. This prototype is
+retained for comparison, not selected for the Academy film. Its branch passes
+271 tests, with 25 unavailable-device/reference skips.
+
 ### References and checks
 
 The implementation draws on documented techniques, not an inferred reconstruction

@@ -183,6 +183,41 @@ def test_haze_converges_to_one_color_at_nadir_in_a_directional_sky(renderer_fact
     np.testing.assert_allclose(airlight,np.broadcast_to(airlight[0],(4,3)),rtol=.015,atol=2e-5)
 
 
+@pytest.mark.parametrize("stretch,density,height,strength,threshold,unchanged",[
+    (1.,0.,2.,1.,.75,True),       # Undeformed water cannot acquire white detail.
+    (.4,0.,2.,1.,.75,False),      # Resolved, active compression is the only cue.
+    (.4,100.,2.,1.,.75,True),     # Established opaque foam keeps its material.
+    (.4,0.,5000.,1.,.75,True),    # Unresolved detail must not whiten the horizon.
+    (.4,0.,2.,0.,.75,True),       # Hiding foam also hides its transient fringe.
+    (.4,0.,2.,1.,.25,True),      # Follow the actual emitter's configured threshold.
+])
+def test_optional_crumble_is_confined_to_resolved_uncovered_compression(
+        renderer_factory,stretch,density,height,strength,threshold,unchanged):
+    renderer=renderer_factory(foam_density=(density,0.,0.))
+    original=renderer.frame
+    displacement=original.displacement.clone()
+    displacement[...,3]=-stretch
+    frame=replace(original,displacement=displacement)
+    renderer.upload(frame)
+    foam=replace(renderer.foam_state,parameters=replace(renderer.foam_state.parameters,
+        compression_threshold=threshold))
+    renderer.upload_foam(foam)
+    before_displacement=frame.displacement.clone()
+    before_normal=frame.normal.clone()
+    before_foam=foam.density.clone()
+    camera=replace(CAMERA,height=height,pitch=-65.)
+    look=replace(LOOK,foam=strength)
+    baseline=renderer.render_image(112,80,camera,look)
+    candidate=renderer.render_image(112,80,camera,replace(look,crest_crumble=True))
+    if unchanged: np.testing.assert_array_equal(candidate,baseline)
+    else: assert np.count_nonzero(candidate!=baseline)>20
+    hdr=linear_hdr(renderer)
+    assert np.isfinite(hdr).all() and hdr[...,:3].min()>=0. and hdr[...,:3].max()<=1.005
+    assert torch.equal(frame.displacement,before_displacement)
+    assert torch.equal(frame.normal,before_normal)
+    assert torch.equal(foam.density,before_foam)
+
+
 @pytest.mark.parametrize("samples", [1, 4])
 def test_compact_hdr_source_adds_finite_positive_scattering(renderer_factory, samples):
     theta = (np.arange(128)+.5)*math.pi/128

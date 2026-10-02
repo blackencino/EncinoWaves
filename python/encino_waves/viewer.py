@@ -512,6 +512,11 @@ class Viewer:
                                   sky_gain=view.look.sky_gain,haze=view.look.haze)
             changed,index=imgui.combo("Water shading",["physical","2015"].index(self.look.material),["Presentation","Original 2015"])
             if changed: self.look=replace(self.look,material=["physical","2015"][index])
+            imgui.begin_disabled(self.look.material!="physical" or not self.foam_parameters.enabled
+                                 or self.foam_parameters.emission_model!="compression")
+            changed,value=imgui.checkbox("Crest crumble (experimental)",self.look.crest_crumble)
+            if changed: self.look=replace(self.look,crest_crumble=value)
+            imgui.end_disabled()
             for label,name,lo,hi,fmt in (("Height","height",.5,2000,"%.1f m"),("Pitch","pitch",-89,89,"%.1f deg"),("Heading","yaw",-180,180,"%.1f deg")):
                 changed,value=imgui.slider_float(label,getattr(self.camera,name),lo,hi,fmt)
                 if changed: self.camera=replace(self.camera,**{name:value})
