@@ -220,10 +220,10 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
     let deep_air=1.0-exp(-density.b*u.aeration.y);
     // Absorption/scattering are in inverse metres; added bubbles increase both
     // scattering and extinction, keeping the single-scattering albedo bounded.
-    // A subdued blue-green body under the reflected sky. Bubbles lighten this
-    // medium without overwhelming the surface reflection with a cyan veil.
-    let sigma_a=vec3f(.22,.075,.065);
-    let sigma_s=vec3f(.010,.018,.016)+vec3f(.6)*shallow+vec3f(.1)*deep_air;
+    // Muted grey-green water with a slight earthy warmth. Less separation
+    // between RGB transport coefficients avoids a saturated turquoise body.
+    let sigma_a=vec3f(.145,.115,.125);
+    let sigma_s=vec3f(.021,.022,.019)+vec3f(.6)*shallow+vec3f(.1)*deep_air;
     let sigma_t=sigma_a+sigma_s;
     let albedo=sigma_s/sigma_t;
     let ambient=sky_light(normalize(vec3f(normal.xy*.25,1.0)),true);
