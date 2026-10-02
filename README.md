@@ -59,6 +59,8 @@ retains the same patch and seed, with smooth changes in sea state and camera.
 **I** toggles large title-safe telemetry: wind speed in knots, ocean depth in
 meters, fetch in kilometers, and unitless swell. Its short fades and visibility
 are recorded in the take. Patch size is omitted from the presentation overlay.
+**C** toggles camera height, pitch, yaw, and field of view in the preview only;
+this display and its toggle events are excluded from the recording and movie.
 
 Live Maya camera gestures are unchanged. The recording keeps the camera before
 an adjustment and its settled position after four seconds without another tweak;

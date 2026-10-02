@@ -86,10 +86,17 @@ def draw_title(font, elapsed):
     draw = imgui.get_foreground_draw_list()
     draw.add_rect_filled((0.0, 0.0), (WIDTH, HEIGHT),
                          _color(0.0, 0.0, 0.0, opacity))
-    _centered_text(font, 112.0, "Encino Waves", 348.0, opacity, shadow=False)
-    _centered_text(font, 52.0, "Interactive Ocean Synthesis", 508.0,
+    title_height = _text_size(font, 112.0, "Encino Waves").y
+    subtitle_height = _text_size(font, 52.0, "Interactive Ocean Synthesis").y
+    byline_height = _text_size(font, 44.0, "Christopher Jon Horvath").y
+    group_height = title_height + 14.0 + subtitle_height + 52.0 + byline_height
+    title_y = (HEIGHT - group_height) * 0.5
+    subtitle_y = title_y + title_height + 14.0
+    byline_y = subtitle_y + subtitle_height + 52.0
+    _centered_text(font, 112.0, "Encino Waves", title_y, opacity, shadow=False)
+    _centered_text(font, 52.0, "Interactive Ocean Synthesis", subtitle_y,
                    opacity * 0.90, shadow=False)
-    _centered_text(font, 44.0, "Christopher Jon Horvath", 638.0,
+    _centered_text(font, 44.0, "Christopher Jon Horvath", byline_y,
                    opacity * 0.90, shadow=False)
     return True
 
@@ -164,3 +171,21 @@ def draw_telemetry(font, parameters, opacity):
         y = 240.0 + row * 80.0
         _text(font, 52.0, label, 96.0, y, opacity * 0.90)
         _text(font, 56.0, value, 455.0, y - 2.0, opacity)
+
+
+def draw_camera_telemetry(font, camera, opacity):
+    """Draw optional live-camera information beside the sea telemetry."""
+    opacity = _unit(opacity)
+    if opacity <= 0.0:
+        return
+    _text(font, 52.0, "Camera", 1120.0, 210.0, opacity)
+    rows = (
+        ("Height", f"{camera.height:.1f} meters"),
+        ("Pitch", f"{camera.pitch:.1f} degrees"),
+        ("Yaw", f"{camera.yaw:.1f} degrees"),
+        ("FOV", f"{camera.fov:.1f} degrees"),
+    )
+    for row, (label, value) in enumerate(rows):
+        y = 290.0 + row * 80.0
+        _text(font, 52.0, label, 1120.0, y, opacity * 0.90)
+        _text(font, 56.0, value, 1410.0, y - 2.0, opacity)

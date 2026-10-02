@@ -20,7 +20,7 @@ from wgpu.utils.imgui import ImguiRenderer
 
 from .camera import Camera, interpolate_camera
 from .academy_fonts import nimbus_regular
-from .academy_overlays import TITLE_DURATION, draw_title, draw_control, draw_example, draw_telemetry, format_control_value
+from .academy_overlays import TITLE_DURATION, draw_title, draw_control, draw_example, draw_telemetry, draw_camera_telemetry, format_control_value
 from .academy_scenes import opening_scene, academy_examples, ACADEMY_FOAM
 from .editing import make_wave_basis, same_wave_basis
 from .foam import Foam_parameters, prepare_foam
@@ -97,6 +97,7 @@ class AcademyViewer(Viewer):
         self.performance_time = 0.0
         self.performance_overlay = None
         self.telemetry = {"visible": False, "from": 0.0, "start": 0.0}
+        self.camera_telemetry = {"visible": False, "from": 0.0, "start": 0.0}
         self._performance_replay = False
         self._held_keys = set()
         self._camera_take = None
@@ -355,7 +356,7 @@ class AcademyViewer(Viewer):
             self._label("Academy setup", 23, (.92, .94, .92, 1))
             imgui.text("1024 m patch | 2048 waves | 1024 foam")
             imgui.text("Output: 1080p24 | 4096 waves")
-            imgui.text_wrapped("W wind speed, D depth, F fetch, S swell, M foam. Left/right arrows drive the selected control. E advances to the next example. I toggles telemetry.")
+            imgui.text_wrapped("W wind speed, D depth, F fetch, S swell, M foam. Left/right arrows drive the selected control. E advances to the next example. I toggles telemetry. C toggles camera info (preview only).")
             imgui.text_wrapped("Maya camera controls are unchanged. Playback smooths between cameras after four seconds without an adjustment.")
             imgui.begin_disabled(self.rehearsal is not None or self.replay)
             if imgui.button("Reset opening ocean"):
@@ -376,6 +377,9 @@ class AcademyViewer(Viewer):
             fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
             self._draw_comparison_labels(WIDTH, HEIGHT, fixed)
         draw_telemetry(self.overlay_font, self.state.parameters, self._telemetry_opacity(self.performance_time))
+        if not self.replay:
+            draw_camera_telemetry(self.overlay_font, self.camera,
+                                  self._fade_opacity(self.camera_telemetry, time.perf_counter()))
         if self.performance_overlay:
             overlay = dict(self.performance_overlay)
             if overlay.get("mode") == "examples":
@@ -402,7 +406,7 @@ class AcademyViewer(Viewer):
             if imgui.button("Stop rehearsal (R)"):
                 self.stop_rehearsal()
         else:
-            self._label("W wind  D depth  F fetch  S swell  M foam  E next example  I telemetry", 15, (.91, .93, .92, 1))
+            self._label("W wind  D depth  F fetch  S swell  M foam  E next  I sea  C camera", 15, (.91, .93, .92, 1))
             imgui.begin_disabled(self.changed or self.future is not None or self.movie_process is not None)
             if imgui.button("Record rehearsal (R)"):
                 self.start_rehearsal()
@@ -427,9 +431,20 @@ class AcademyViewer(Viewer):
         return (self.replay and self._performance_replay or self.rehearsal is not None) and self.performance_time < TITLE_DURATION
 
     def _telemetry_opacity(self, now):
-        amount = min(1.0, max(0.0, (now - self.telemetry["start"]) / .22))
+        return self._fade_opacity(self.telemetry, now)
+
+    @staticmethod
+    def _fade_opacity(state, now):
+        amount = min(1.0, max(0.0, (now - state["start"]) / .22))
         eased = amount ** 3 * (10 + amount * (-15 + 6 * amount))
-        return self.telemetry["from"] + (float(self.telemetry["visible"]) - self.telemetry["from"]) * eased
+        return state["from"] + (float(state["visible"]) - state["from"]) * eased
+
+    def _toggle_camera_telemetry(self):
+        # Operator-only state: never captured by rehearsal_values or the tape.
+        now = time.perf_counter()
+        opacity = self._fade_opacity(self.camera_telemetry, now)
+        self.camera_telemetry = {"visible": not self.camera_telemetry["visible"],
+                                 "from": opacity, "start": now}
 
     def _toggle_telemetry(self, now):
         opacity = self._telemetry_opacity(now)
@@ -607,6 +622,8 @@ class AcademyViewer(Viewer):
             self._next_example(now)
         elif key == "i":
             self._toggle_telemetry(now)
+        elif key == "c":
+            self._toggle_camera_telemetry()
         elif key == "r":
             if self.rehearsal is None:
                 self.start_rehearsal()
