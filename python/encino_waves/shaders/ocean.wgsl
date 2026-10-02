@@ -218,12 +218,19 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
     let density=raw_density*u.aeration.x*u.ocean.w;
     let shallow=1.0-exp(-density.g*u.aeration.y*2.0);
     let deep_air=1.0-exp(-density.b*u.aeration.y);
-    // Absorption/scattering are in inverse metres; added bubbles increase both
-    // scattering and extinction, keeping the single-scattering albedo bounded.
+    // Absorption/scattering are in inverse metres.
     // Muted grey-green water with a slight earthy warmth. Less separation
     // between RGB transport coefficients avoids a saturated turquoise body.
-    let sigma_a=vec3f(.145,.115,.125);
-    let sigma_s=vec3f(.021,.022,.019)+vec3f(.6)*shallow+vec3f(.1)*deep_air;
+    let water_absorption=vec3f(.145,.115,.125);
+    let water_scattering=vec3f(.021,.022,.019);
+    let water_albedo=water_scattering/(water_absorption+water_scattering);
+    // A tuned aerated medium: longer optical paths through colored water tint
+    // submerged bubbles. Its brighter albedo follows the base water hue rather
+    // than approaching white as density grows. Surface foam is lit separately.
+    let aerated_albedo=min(4.0*water_albedo,vec3f(.85));
+    let bubbles=.6*shallow+.1*deep_air;
+    let sigma_s=water_scattering+bubbles*aerated_albedo;
+    let sigma_a=water_absorption+bubbles*(vec3f(1.0)-aerated_albedo);
     let sigma_t=sigma_a+sigma_s;
     let albedo=sigma_s/sigma_t;
     let ambient=sky_light(normalize(vec3f(normal.xy*.25,1.0)),true);

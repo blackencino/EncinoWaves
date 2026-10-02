@@ -433,8 +433,13 @@ shot. The water material uses desaturated grey-green absorption/scattering with
 a slight warm undertone: absorption `(0.145, 0.115, 0.125)` and base scattering
 `(0.021, 0.022, 0.019)` in inverse metres. Closer RGB coefficients replace the
 previous turquoise body without tinting reflected sky or foam. Bubble return is
-subdued. Surface foam has diffuse reflectance 0.72–0.86 before its
-small mean-one detail modulation; it remains illuminated by the sky. Foam can
+subdued. The effective aerated medium targets four times the base water's
+scattering albedo, capped at 0.85, and retains its hue. Added extinction is split
+between scattering and absorption to approach that target; neutral added
+scattering previously made dense underwater bubbles approach white. This is a
+tuned approximation for the longer colored-water paths in an aerated region,
+not a microscopic bubble transport model. Surface foam has diffuse reflectance
+0.72–0.86 before its small mean-one detail modulation; it remains illuminated by the sky. Foam can
 legitimately be darker than a strong specular glint.
 
 `environment.py` creates a separate 1024x512 GGX-prefiltered panorama on the GPU
@@ -443,7 +448,9 @@ sampling and a spherical-area/PDF source footprint. The split-sum response is
 applied once. Shortening of filtered wave normals supplies a bounded unresolved
 slope estimate; it is an approximate mapping to GGX roughness, not an exact LEAN
 covariance reconstruction. The original full-resolution sky remains the visible
-background. Trilinear/anisotropic filtering limits distant shimmer.
+background. Trilinear/anisotropic filtering limits distant shimmer. The filtered
+environment reflection can look visibly smeared at steep downward angles; this
+limitation remains in the current presentation material.
 
 `ocean_dome` reprojects the existing upper sky over the hemisphere. The renderer
 uses a 10-degree horizon trim: the tallest photographed turbine extended above
