@@ -39,6 +39,8 @@
 #include "Basics.h"
 #include "Parameters.h"
 
+#include <array>
+
 namespace EncinoWaves {
 
 //------------------------------------------------------------------------------
@@ -55,22 +57,66 @@ T numericallyIntegrate(FUNC f, T a, T b, int n) {
 //------------------------------------------------------------------------------
 template <typename T>
 T swellShape(T omega, T modal_omega, T swell_amount) {
-  return 16.1 * std::tanh(modal_omega / omega) * sqr(swell_amount);
+  return T(16) * (omega > T(0) ? std::tanh(modal_omega / omega) : T(1)) *
+         sqr(swell_amount);
 }
 
 //------------------------------------------------------------------------------
 template <typename T>
 T swell(T theta, T omega, T modal_omega, T swell_amount) {
-  T shape = swellShape(omega, modal_omega, swell_amount);
-  return std::pow(std::abs(std::cos(theta / 2.0)), 2.0 * shape);
+  T const shape = swellShape(omega, modal_omega, swell_amount);
+  T const half_cos = std::sin((PI<T> - std::abs(theta)) / T(2));
+  return std::pow(std::abs(half_cos), T(2) * shape);
 }
 
 //------------------------------------------------------------------------------
 template <typename T, typename FUNCA, typename FUNCB>
-T normalizedSwellDirectionalProduct(T theta, FUNCA A, FUNCB B) {
+T normalizedSwellDirectionalProduct(T theta, FUNCA A, FUNCB B,
+                                    T extent = PI<T>) {
   auto product = [A, B](T x) -> T { return A(x) * B(x); };
 
-  T denom = numericallyIntegrate(product, -PI<T> / 2, PI<T> / 2, 36);
+  // Even 64-point Gauss-Legendre rule, over the complete support. The old
+  // half-circle trapezoid over-normalized Donelan-Banner and under-resolved
+  // narrow swell lobes. Accumulate in double even for float fields.
+  static std::array<std::array<double, 2>, 32> const quadrature = {{
+    {0.024350292663424436, 0.048690957009139689},
+    {0.072993121787799042, 0.048575467441503428},
+    {0.12146281929612056, 0.048344762234802933},
+    {0.1696444204239928, 0.047999388596458303},
+    {0.21742364374000708, 0.047540165714830343},
+    {0.26468716220876742, 0.046968182816210007},
+    {0.31132287199021097, 0.046284796581314375},
+    {0.35722015833766813, 0.0454916279274181},
+    {0.40227015796399157, 0.044590558163756601},
+    {0.44636601725346409, 0.043583724529323471},
+    {0.48940314570705296, 0.042473515123653542},
+    {0.53127946401989457, 0.041262563242623486},
+    {0.571895646202634, 0.039953741132720454},
+    {0.61115535517239328, 0.038550153178615605},
+    {0.64896547125465731, 0.037055128540240019},
+    {0.68523631305423327, 0.035472213256882226},
+    {0.71988185017161077, 0.033805161837141877},
+    {0.75281990726053194, 0.032057928354851412},
+    {0.78397235894334139, 0.030234657072402488},
+    {0.81326531512279754, 0.028339672614259424},
+    {0.84062929625258032, 0.026377469715054894},
+    {0.86599939815409277, 0.024352702568711086},
+    {0.88931544599511414, 0.022270173808382945},
+    {0.91052213707850282, 0.020134823153530039},
+    {0.92956917213193957, 0.017951715775697288},
+    {0.94641137485840277, 0.01572603047602511},
+    {0.96100879965205366, 0.01346304789671912},
+    {0.97332682778991098, 0.011168139460131008},
+    {0.98333625388462598, 0.0088467598263633606},
+    {0.99101337147674429, 0.0065044579689784374},
+    {0.99634011677195522, 0.0041470332605646485},
+    {0.99930504173577217, 0.0017832807216942642},
+  }};
+  double integral = 0;
+  for (auto const& point : quadrature) {
+    integral += point[1] * double(product(T(point[0] * extent)));
+  }
+  T const denom = T(2 * double(extent) * integral);
   return product(theta) / denom;
 }
 
@@ -83,12 +129,25 @@ T modalAngularFrequencyJONSWAP(T gravity, T meanWindSpeed, T fetchLength) {
 }
 
 //------------------------------------------------------------------------------
+// Gamma duplication reduces the cosine-power normalization to a stable ratio.
+// The double intermediate also limits cancellation for float exponents.
+template <typename T>
+T cosine_power_spreading(T const theta, T const shape) {
+  double const s = double(shape);
+  double const log_q = std::lgamma(s + 1) - std::lgamma(s + .5) -
+                       std::log(2 * std::sqrt(PI<double>));
+  // Exactly zero at +/- pi, even when cos(pi/2) rounds away from zero.
+  T const half_cos = std::sin((PI<T> - std::abs(theta)) / T(2));
+  return T(std::exp(log_q)) * std::pow(std::abs(half_cos), T(2) * shape);
+}
+
+//------------------------------------------------------------------------------
 template <typename T>
 class DonelanBannerDirectionalSpreading {
 public:
   DonelanBannerDirectionalSpreading(const Parameters<T>& params)
       : m_modalAngularFrequency(modalAngularFrequencyJONSWAP(
-          params.gravity, params.windSpeed, params.fetch))
+          params.gravity, params.windSpeed, params.fetch * T(1000)))
       , m_swell(params.directionalSpreading.swell) {}
 
   T operator()(T i_omega, T i_theta, T i_kMag, T i_dTheta) const {
@@ -105,24 +164,25 @@ public:
       beta_s = std::pow(10, expo);
     }
 
-    // Make a hyperbolic secant function
-    static auto sech = [](T x) { return 1.0 / std::cosh(x); };
-
     // We need to do a numerical integration to determine the
     // normalization factor for the product of the original function (B)
     // with the swell elongation (A).
     auto A = [this, i_omega](T x) -> T {
       return swell(x, i_omega, m_modalAngularFrequency, m_swell);
     };
-    auto B = [beta_s](T x) -> T { return sqr(sech(beta_s * x)); };
+    auto B = [beta_s](T const x) -> T {
+      T const e = std::exp(-T(2) * std::abs(beta_s * x));
+      return T(4) * e / sqr(T(1) + e);
+    };
 
-    if (m_swell >= 0.0) {
+    if (m_swell > 0.0) {
       return normalizedSwellDirectionalProduct(i_theta, A, B);
     } else {
-      T integral =
-        (std::tanh(beta_s * PI<T>) - std::tanh(-beta_s * PI<T>)) / beta_s;
-      T d = B(i_theta) / integral;
-      return Imath::lerp(d, static_cast<T>(-1.0 / (2.0 * PI<T>)),
+      // beta/tanh(pi*beta) has a removable singularity at beta=0.
+      T const integral = beta_s > T(0) ?
+        T(2) * std::tanh(beta_s * PI<T>) / beta_s : TAU<T>;
+      T const d = B(i_theta) / integral;
+      return Imath::lerp(d, T(1) / TAU<T>,
                          Imath::clamp(-m_swell, T(0), T(1)));
     }
   }
@@ -138,7 +198,7 @@ class MitsuyasuDirectionalSpreading {
 public:
   MitsuyasuDirectionalSpreading(const Parameters<T>& params)
       : m_modalAngularFrequency(modalAngularFrequencyJONSWAP(
-          params.gravity, params.windSpeed, params.fetch))
+          params.gravity, params.windSpeed, params.fetch * T(1000)))
       , m_modalShape(11.5 * std::pow(m_modalAngularFrequency *
                                        params.windSpeed / params.gravity,
                                      -2.5))
@@ -158,15 +218,12 @@ public:
 
     shape += shape_bias;
 
-    T factor_A = std::pow(2.0, (2.0 * shape) - 1.0) / PI<T>;
-    T factor_B =
-      sqr(std::tgamma(shape + 1.0)) / std::tgamma((2.0 * shape) + 1.0);
-    T factor_C = std::pow(std::abs(std::cos(i_theta / 2.0)), 2.0 * shape);
+    T const direction = cosine_power_spreading(i_theta, shape);
     if (m_swell < 0) {
-      return Imath::lerp(factor_A * factor_B * factor_C, T(1) / T(TAU<T>),
+      return Imath::lerp(direction, T(1) / T(TAU<T>),
                          Imath::clamp(-m_swell, T(0), T(1)));
     } else {
-      return factor_A * factor_B * factor_C;
+      return direction;
     }
   }
 
@@ -184,7 +241,7 @@ class HasselmannDirectionalSpreading {
 public:
   HasselmannDirectionalSpreading(const Parameters<T>& params)
       : m_modalAngularFrequency(modalAngularFrequencyJONSWAP(
-          params.gravity, params.windSpeed, params.fetch))
+          params.gravity, params.windSpeed, params.fetch * T(1000)))
       , m_modalShape(11.5 * std::pow(m_modalAngularFrequency *
                                        params.windSpeed / params.gravity,
                                      -2.5))
@@ -208,15 +265,12 @@ public:
     }
     shape += shape_bias;
 
-    T factor_A = std::pow(2.0, (2.0 * shape) - 1.0) / PI<T>;
-    T factor_B =
-      sqr(std::tgamma(shape + 1.0)) / std::tgamma((2.0 * shape) + 1.0);
-    T factor_C = std::pow(std::abs(std::cos(i_theta / 2.0)), 2.0 * shape);
+    T const direction = cosine_power_spreading(i_theta, shape);
     if (m_swell < 0) {
-      return Imath::lerp(factor_A * factor_B * factor_C, T(1) / T(TAU<T>),
+      return Imath::lerp(direction, T(1) / T(TAU<T>),
                          Imath::clamp(-m_swell, T(0), T(1)));
     } else {
-      return factor_A * factor_B * factor_C;
+      return direction;
     }
   }
 
@@ -242,12 +296,13 @@ protected:
 public:
   PosCosSquaredDirectionalSpreading(const Parameters<T>& params)
       : m_modalAngularFrequency(modalAngularFrequencyJONSWAP(
-          params.gravity, params.windSpeed, params.fetch))
+          params.gravity, params.windSpeed, params.fetch * T(1000)))
       , m_swell(params.directionalSpreading.swell) {}
 
   T operator()(T i_omega, T i_theta, T i_kMag, T i_dTheta) const {
     auto A = [this, i_omega](T x) -> T {
-      return swell(x, i_omega, m_modalAngularFrequency, m_swell);
+      return swell(x, i_omega, m_modalAngularFrequency,
+                   std::max(T(0), m_swell));
     };
     auto B = [](T x) -> T {
       if (x < -PI_2<T> || x > PI_2<T>) {
@@ -257,7 +312,10 @@ public:
       }
     };
 
-    return normalizedSwellDirectionalProduct(i_theta, A, B);
+    T const direction = normalizedSwellDirectionalProduct(i_theta, A, B, PI_2<T>);
+    return m_swell < T(0) ?
+      Imath::lerp(direction, T(1) / TAU<T>, Imath::clamp(-m_swell, T(0), T(1))) :
+      direction;
   }
 
 protected:

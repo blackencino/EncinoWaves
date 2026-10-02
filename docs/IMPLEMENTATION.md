@@ -139,7 +139,7 @@ CUDA uses the same tensor operations; NVIDIA hardware remains untested here.
 
 ## Paper and historical implementations
 
-The paper and checked-in source are not numerically identical in every detail.
+The paper and original 2015 source are not numerically identical in every detail.
 Hasselmann is the default directional spreading model, as in the original C++
 parameters. Tessendorf mode still selects positive cosine-squared spreading.
 The default `convention="paper"` uses:
@@ -152,13 +152,23 @@ The default `convention="paper"` uses:
 - The original implementation's Pierson-Moskowitz constants and JONSWAP peak
   parameterization. JONSWAP gamma is explicitly 3.3 (equation 28).
 
+The maintained C++ headers now also use the corrected fetch units, full-circle
+directional normalization and paper swell coefficient 16. Donelan-Banner and
+cosine-squared negative swell mix toward positive isotropic density. The product
+normalization uses 64-point Gauss-Legendre quadrature, with the analytic Donelan
+integral when swell is nonpositive. The old seeded JONSWAP gamma and RNG remain
+in C++; supplying that gamma to the Python reference isolates equation checks
+from the random-stream differences.
+
 The 2025 Torch comparison (`234835a`, on `feature/simplified_debug`) rewrote the
 smooth TMA depth factor as `sigmoid(3.6 * (wh - 1.125))`, where
 `wh = omega * sqrt(depth / gravity)`. The CPU reference and GPU implementation
 both use that form. It is algebraically identical to the original
 `0.5 + 0.5*tanh(1.8 * (wh - 1.125))`, avoiding cancellation toward the low end of
 the curve. The factor's physical input bounds limit that cancellation, so this
-is a modest numerical improvement, not a change in the spectrum model.
+is a modest numerical improvement, not a change in the spectrum model. This
+evaluation is also backported to C++, along with log-domain spectrum evaluation
+and an explicit zero-energy DC mode.
 
 The same historical commit replaced the direct Hasselmann gamma-function ratio
 with log-gamma evaluation to prevent overflowing intermediate factors. The
@@ -166,7 +176,7 @@ current GPU setup already combines this with the gamma duplication identity:
 `log(Q) = lgamma(s+1) - lgamma(s+0.5) - log(2*sqrt(pi))`. This avoids separately
 forming the large power of two and gamma factors; it is particularly useful at
 large swell. The dispersion derivative also avoids overflowing `cosh(h*k)` by
-using `sech²(h*k) = 1 - tanh²(h*k)`.
+using `sech²(h*k) = 1 - tanh²(h*k)`. Both corrections are backported to C++.
 
 `legacy_2015` preserves the master's fetch-unit omission, its half-circle
 36-segment normalization for product spreading, and its 16.1 swell coefficient.
@@ -178,7 +188,7 @@ draw. The new portable wavenumber hash uses the PCG permutation from the later
 functional branch with explicit integer truncation and Box-Muller variates.
 The explicit gamma parameter can reproduce a known old gamma value.
 
-Negative swell mixes towards isotropic spreading. The older Donelan implementation
+Negative swell mixes towards isotropic spreading. The original Donelan implementation
 has a negative sign on its isotropic target; the new implementation keeps that
 mixture nonnegative instead of propagating the sign error. This difference also
 applies to the compatibility options.
@@ -190,8 +200,11 @@ central differences of displaced points.
 
 Numerical tests check normalization, dispersion derivatives, limiting cases,
 resolution stability, history independence and displacement/crest/normal outputs
-against FFTW. `tests/reference/original_oracle.cpp` includes the unmodified 2015
-scalar headers to generate a checked-in fixture. Tests compare the dispersion,
+against FFTW. `tests/reference/original_oracle.cpp` uses the unmodified scalar
+headers extracted from pinned commit `b7db469` to generate the historical fixture.
+`test_cpp_numerics.py` separately compiles the maintained C++ headers and checks
+float/double spectra, dispersion, nonnegative spreading and angular energy.
+Tests compare the dispersion,
 spectrum and spreading equations, then replay those original spectral coefficients
 through GPU propagation against a double-precision FFTW reference. This checks an
 actual original realization without conflating it with the new RNG.

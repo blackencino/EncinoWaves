@@ -29,9 +29,10 @@ requires a GPU; CPU reference work must explicitly request `--device cpu`.
 
 ### Artist controls
 
-The viewer exposes wind speed, fetch, depth, swell, wind direction and the four
-directional spreading models. **Hasselmann** is the default. Advanced controls
-include resolution through 4096², patch size, spectrum, dispersion, pinch and
+The main viewer controls are wind speed, fetch, depth, swell and wind direction.
+**Hasselmann** is the default; the alternative spreading models are in
+**Resolution & model**. Advanced controls include resolution through 4096²,
+patch size, spectrum, dispersion, pinch and
 random seed. Units are metres,
 seconds, m/s, and kilometres of fetch. The original extended slider ranges are
 retained; the extreme wind settings are artist controls, not a claim that the

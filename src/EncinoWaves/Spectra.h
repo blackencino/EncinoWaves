@@ -48,8 +48,12 @@ namespace EncinoWaves {
 // which is calculated differently for different spectra.
 template <typename T>
 T AlphaBetaSpectrum(T A, T B, T g, T w, T wm) {
-  return (A * sqr(g) / std::pow(w, T(5.0))) *
-         std::exp(-B * std::pow(wm / w, T(4.0)));
+  if (w <= T(0)) {
+    return T(0);
+  }
+  // Avoid inf * 0 in the low-frequency tail, including the DC mode.
+  return std::exp(std::log(A * sqr(g)) - T(5) * std::log(w) -
+                  B * std::pow(wm / w, T(4)));
 }
 
 //-*****************************************************************************
@@ -167,8 +171,10 @@ public:
   }
 
   T kitaigorodskiiDepth(T i_omega) const {
-    const T wh = i_omega * m_kdGain;
-    return T(0.5) + (T(0.5) * std::tanh(T(1.8) * (wh - T(1.125))));
+    T const x = T(3.6) * (i_omega * m_kdGain - T(1.125));
+    T const e = std::exp(-std::abs(x));
+    // sigmoid(2*x) == (1 + tanh(x))/2, without subtractive cancellation.
+    return x >= T(0) ? T(1) / (T(1) + e) : e / (T(1) + e);
   }
 
   T operator()(T i_omega) const {

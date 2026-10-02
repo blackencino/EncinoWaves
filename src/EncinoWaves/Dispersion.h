@@ -100,7 +100,7 @@ public:
 
   void operator()(T i_k, T& o_omega, T& o_dOmegaDk) const {
     o_omega    = std::sqrt(std::abs(m_gravity * i_k));
-    o_dOmegaDk = m_gravity / (T(2.0) * o_omega);
+    o_dOmegaDk = i_k == T(0) ? T(0) : m_gravity / (T(2.0) * o_omega);
   }
 };
 
@@ -125,11 +125,13 @@ public:
   }
 
   void operator()(T i_k, T& o_omega, T& o_dOmegaDk) const {
-    const T hk = i_k * m_depth;
-    o_omega    = std::sqrt(std::abs(this->m_gravity * i_k * std::tanh(hk)));
+    T const hk = i_k * m_depth;
+    T const th = std::tanh(hk);
+    o_omega = std::sqrt(std::abs(this->m_gravity * i_k * th));
 
-    o_dOmegaDk = (this->m_gravity * (std::tanh(hk) + hk / sqr(std::cosh(hk)))) /
-                 (T(2.0) * o_omega);
+    // sech^2(hk) = 1 - tanh^2(hk), without an overflowing cosh.
+    o_dOmegaDk = i_k == T(0) ? T(0) :
+      this->m_gravity * (th + hk * (T(1) - sqr(th))) / (T(2) * o_omega);
   }
 };
 
@@ -155,16 +157,17 @@ public:
   }
 
   void operator()(T i_k, T& o_omega, T& o_dOmegaDk) const {
-    const T hk    = this->m_depth * i_k;
-    const T k2s   = sqr(i_k) * m_sigmaOverRho;
-    const T gpk2s = this->m_gravity + k2s;
+    T const hk = this->m_depth * i_k;
+    T const th = std::tanh(hk);
+    T const k2s = sqr(i_k) * m_sigmaOverRho;
+    T const gpk2s = this->m_gravity + k2s;
 
-    o_omega = std::sqrt(std::abs(i_k * gpk2s * std::tanh(hk)));
+    o_omega = std::sqrt(std::abs(i_k * gpk2s * th));
 
-    const T numer =
-      ((gpk2s + k2s + k2s) * std::tanh(hk)) + (hk * gpk2s / sqr(std::cosh(hk)));
+    T const numer =
+      (gpk2s + k2s + k2s) * th + hk * gpk2s * (T(1) - sqr(th));
 
-    o_dOmegaDk = std::abs(numer) / (T(2.0) * o_omega);
+    o_dOmegaDk = i_k == T(0) ? T(0) : std::abs(numer) / (T(2) * o_omega);
   }
 };
 

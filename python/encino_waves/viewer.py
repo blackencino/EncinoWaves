@@ -437,12 +437,6 @@ class Viewer:
         self._slider("Ocean depth","depth",.25,1000,"%.1f m","Depth changes the wave spectrum and speed while preserving travelling-wave phase.",True)
         self._slider("Swell","swell",-1,2,"%.2f","0: empirical spreading; positive: narrower swell; -1: all directions equally.")
         self._slider("Wind direction","wind_direction",-180,180,"%.0f degrees","Rotate the same ocean. 0 degrees is +X; 90 degrees is +Y.")
-        imgui.text("Directional spreading")
-        models=["donelan_banner","hasselmann","mitsuyasu","cosine_squared"]
-        labels=["Donelan-Banner","Hasselmann","Mitsuyasu","Cosine squared"]
-        imgui.set_next_item_width(-1)
-        changed,index=imgui.combo("##direction",models.index(self.parameters.spreading),labels)
-        if changed: self.edit_parameters(spreading=models[index])
         imgui.spacing()
         imgui.separator()
         changed,value=imgui.checkbox("Compare with earlier model",self.comparing)
@@ -500,6 +494,12 @@ class Viewer:
             if imgui.button("Open HDR sky..."): self._open_file("sky")
         expanded=imgui.collapsing_header("Resolution & model")
         if expanded:
+            imgui.text("Directional spreading")
+            models=["donelan_banner","hasselmann","mitsuyasu","cosine_squared"]
+            labels=["Donelan-Banner","Hasselmann","Mitsuyasu","Cosine squared"]
+            imgui.set_next_item_width(-1)
+            changed,index=imgui.combo("##direction",models.index(self.parameters.spreading),labels)
+            if changed: self.edit_parameters(spreading=models[index])
             sizes=[16,32,64,128,256,512,1024,2048,4096]
             changed,index=imgui.combo("Resolution",sizes.index(self.parameters.resolution),[f"{n} x {n}" for n in sizes])
             if changed: self.edit_parameters(resolution=sizes[index])
