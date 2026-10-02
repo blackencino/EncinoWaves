@@ -70,15 +70,46 @@ struct Ocean_vertex {
     let iy = index / nx;
     let lateral = 2.0*f32(ix)/u.grid.x-1.0;
     let row = f32(iy)/u.grid.y;
-    let distance = u.grid.z*pow(u.grid.w/u.grid.z,row);
-    let ahead = normalize(vec2f(u.forward_fov.x,u.forward_fov.y));
     let side = u.right_aspect.xy;
-    let base = u.eye_time.xy + distance*(ahead + lateral*side*u.forward_fov.w*u.right_aspect.w*1.8);
+    // Use the camera's horizontal basis even exactly over the pole, where the
+    // forward XY vector vanishes. Maya orbit may continue past straight down.
+    let upright=select(-1.0,1.0,u.up_exposure.z>=0.0);
+    let ahead=vec2f(-side.y,side.x)*upright;
+    let height = u.eye_time.z;
+    let bottom_ray = u.forward_fov.xyz-1.05*u.forward_fov.w*u.up_exposure.xyz*upright;
+    let top_ray = u.forward_fov.xyz+1.05*u.forward_fov.w*u.up_exposure.xyz*upright;
+    var out: Ocean_vertex;
+    // No ocean-plane intersection when even the bottom of the view faces up.
+    if bottom_ray.z>=0.0 {
+        out.position=vec4f(0.0,0.0,2.0,1.0);
+        out.world=u.eye_time.xyz;
+        out.uv=vec2f(0.0);
+        return out;
+    }
+    // Bound the visible water slab, including displaced crests. In a steep
+    // downward view the near intersection can lie BEHIND the camera's XY
+    // position; restricting this grid to positive ahead distance clips it.
+    let padding=max(u.statistics.x,2.0*u.ocean.x/u.ocean.y);
+    let bottom_ratio=dot(bottom_ray.xy,ahead)/(-bottom_ray.z);
+    let near_a=max(-u.grid.w,min((height-padding)*bottom_ratio,
+                                (height+padding)*bottom_ratio)-padding);
+    var far_a=u.grid.w;
+    if top_ray.z<0.0 {
+        let top_ratio=dot(top_ray.xy,ahead)/(-top_ray.z);
+        far_a=min(u.grid.w,max((height-padding)*top_ratio,
+                               (height+padding)*top_ratio)+padding);
+    }
+    let span=max(u.grid.z,far_a-near_a);
+    let scale=max(abs(height),u.grid.z);
+    let distance=near_a+scale*(pow(1.0+span/scale,row)-1.0);
+    let plane_depth=dot(vec3f(ahead*distance,-height),u.forward_fov.xyz);
+    let half_width=max(u.grid.z,plane_depth+padding)*u.forward_fov.w*u.right_aspect.w*1.05+padding;
+    let base=u.eye_time.xy+distance*ahead+lateral*half_width*side;
     // The view-adaptive grid is in world space. Its inverse-transformed base
     // samples the unchanged +X ocean; rotate displaced points back to the world.
     let uv = rotate_xy(base,-u.environment.w)/u.ocean.x;
     let texel_world = u.ocean.x/u.ocean.y;
-    let footprint = distance*(2.0*u.forward_fov.w*u.right_aspect.w/u.grid.x);
+    let footprint = 2.0*half_width/u.grid.x;
     let lod = max(0.0,log2(max(footprint/texel_world,1.0))-.6);
     let disp = textureSampleLevel(displacements,wave_sampler,uv,lod).xyz;
     let world = vec3f(base,0.0)+ocean_to_world(disp);
@@ -87,7 +118,6 @@ struct Ocean_vertex {
     let clip = vec4f(dot(view,u.right_aspect.xyz)/(u.forward_fov.w*u.right_aspect.w),
                      dot(view,u.up_exposure.xyz)/u.forward_fov.w,
                      z*1.000001-0.1,z);
-    var out: Ocean_vertex;
     out.position = clip;
     out.world = world;
     out.uv = uv;

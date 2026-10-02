@@ -194,3 +194,26 @@ def test_legacy_round_trip_restores_physical_targets_and_bindings(renderer_facto
     renderer.render_image(112, 80, CAMERA, replace(LOOK, material="2015"))
     after = renderer.render_image(112, 80, CAMERA, LOOK)
     np.testing.assert_array_equal(after, before)
+
+
+@pytest.mark.parametrize("pitch", [-45., -67., -80., -89., -90., -100., -125.])
+@pytest.mark.parametrize("height", [.5, 5., 100.])
+def test_downward_frustum_is_covered_by_water(renderer_factory, pitch, height):
+    renderer=renderer_factory()
+    camera=replace(CAMERA,height=height,pitch=pitch)
+    renderer.render_image(160,96,camera,LOOK)
+    hdr=linear_hdr(renderer)
+    # Every ray intersects flat water well inside the far bound. A clipped grid
+    # exposes the unit-white sky, especially in the near corners when tilted.
+    assert np.isfinite(hdr).all()
+    assert hdr[...,:3].max() < .9
+
+
+@pytest.mark.parametrize("size", [(160,96), (257,96), (96,160)])
+def test_legacy_material_covers_downward_views_in_different_aspects(renderer_factory, size):
+    renderer=renderer_factory()
+    look=replace(LOOK,material="2015",exposure=-2.)
+    sky=renderer.render_image(*size,replace(CAMERA,pitch=80.),look)
+    water=renderer.render_image(*size,replace(CAMERA,pitch=-80.),look)
+    # Legacy shading uses a direct display target; compare to its own sky value.
+    assert not np.any(np.all(water[...,:3]==sky[0,0,:3],axis=-1))
