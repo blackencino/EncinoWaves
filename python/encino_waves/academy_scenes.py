@@ -18,12 +18,21 @@ PREVIEW_RESOLUTION = 2048
 FINAL_RESOLUTION = 4096
 DOMAIN = 1024.0
 KNOTS_TO_METERS_PER_SECOND = 1852.0 / 3600.0
+# Rectilinear 20 mm lens on the ALEXA Mini 3.2K/UHD 16:9 image area.
+# ARRI specifies 26.40 x 14.85 mm; camera.fov is VERTICAL.
+# https://www.arri.com/en/cine-systems/cine-cameras/legacy-cine-cameras/alexa-mini
+# Ocean-work reference: Boyd's 20-100 mm Cooke, often at its short end.
+# https://theasc.com/article/hell-high-water-master-commander/
+ACADEMY_FOCAL_LENGTH_MM = 20.0
+ACADEMY_IMAGE_AREA_MM = (26.40, 14.85)
+ACADEMY_VERTICAL_FOV = math.degrees(2 * math.atan(
+    ACADEMY_IMAGE_AREA_MM[1] / (2 * ACADEMY_FOCAL_LENGTH_MM)))
 ACADEMY_FOAM = Foam_parameters(resolution=1024)
 ACADEMY_LOOK = Look(crest_crumble=True, crest_crumble_strength=.5)
 NOAA_SEA_STATE_SOURCE = "https://www.weather.gov/mfl/beaufort"
 
 
-def _camera(height, pitch, yaw, fov=45.0):
+def _camera(height, pitch, yaw, fov=ACADEMY_VERTICAL_FOV):
     """Retain the authored angles while placing the Maya pivot at sea origin."""
     camera = Camera(height=height, pitch=pitch, yaw=yaw, fov=fov)
     distance = -height / math.sin(math.radians(pitch))

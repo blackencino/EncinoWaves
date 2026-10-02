@@ -39,6 +39,11 @@ title card with **Christopher Jon Horvath** beneath the subtitle, followed by a
 smooth reveal. The default sea has a 1024 m domain,
 17 m/s wind, 100 m depth, 300 km fetch, trough damping 1, and half-strength foam
 fringe. The camera is 145.2 m high, pitch −18.1°, heading −139.9°.
+Academy presets use **40.735° vertical / 66.850° horizontal FOV**: a 20 mm
+rectilinear lens equivalent on the [ALEXA Mini's 26.40×14.85 mm UHD image area](https://www.arri.com/en/cine-systems/cine-cameras/legacy-cine-cameras/alexa-mini).
+This adapts the wide end of Russell Boyd's camera-barge lens choice in
+[*Master and Commander*](https://theasc.com/article/hell-high-water-master-commander/)
+to our 16:9 framing; it is a composition choice, not a universal ocean lens.
 
 Press **R** to record a performance, then **R** to cut and automatically save.
 Foam preparation and checkpoint saving finish before the recording clock starts;
