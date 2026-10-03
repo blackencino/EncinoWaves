@@ -1,4 +1,4 @@
-"""Fixed-rate Academy playback, safe publication and real encoder color output."""
+"""Fixed-rate School playback, safe publication and real encoder color output."""
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -7,13 +7,13 @@ import imageio_ffmpeg
 import numpy as np
 import pytest
 
-from encino_waves import academy_export as export
-from encino_waves.academy_timeline import Rehearsal
+from encino_waves import school_export as export
+from encino_waves.school_timeline import Rehearsal
 
 
 def test_encoder_writes_real_1080p24_rec709_mov_and_transforms_rgb(tmp_path):
-    path = tmp_path / "academy.mov"
-    writer = export.Academy_movie_writer(path)
+    path = tmp_path / "school.mov"
+    writer = export.School_movie_writer(path)
     for value in (0, 128, 255):
         writer.write(np.full((1080, 1920, 3), value, np.uint8))
     writer.close()
@@ -43,11 +43,11 @@ def test_encoder_writes_real_1080p24_rec709_mov_and_transforms_rgb(tmp_path):
 
 
 def test_aborted_encode_preserves_existing_destination(tmp_path):
-    path = tmp_path / "academy.mov"
+    path = tmp_path / "school.mov"
     path.write_bytes(b"previous approved movie")
     with pytest.raises(FileExistsError):
-        export.Academy_movie_writer(path)
-    writer = export.Academy_movie_writer(path, overwrite=True)
+        export.School_movie_writer(path)
+    writer = export.School_movie_writer(path, overwrite=True)
     writer.write(np.zeros((1080, 1920, 3), np.uint8))
     writer.close(commit=False)
     assert path.read_bytes() == b"previous approved movie"
@@ -57,7 +57,7 @@ def test_aborted_encode_preserves_existing_destination(tmp_path):
 @pytest.fixture
 def replay_stub(monkeypatch):
     import rendercanvas.offscreen
-    from encino_waves import academy_viewer
+    from encino_waves import school_viewer
     result = SimpleNamespace(viewers=[], canvases=[], writers=[], fail_at=None)
 
     class Canvas:
@@ -97,8 +97,8 @@ def replay_stub(monkeypatch):
         def close(self, commit=True): self.committed = commit
 
     monkeypatch.setattr(rendercanvas.offscreen, "RenderCanvas", Canvas)
-    monkeypatch.setattr(academy_viewer, "AcademyViewer", Viewer)
-    monkeypatch.setattr(export, "Academy_movie_writer", Writer)
+    monkeypatch.setattr(school_viewer, "SchoolViewer", Viewer)
+    monkeypatch.setattr(export, "School_movie_writer", Writer)
     return result
 
 

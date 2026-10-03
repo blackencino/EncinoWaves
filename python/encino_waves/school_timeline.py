@@ -73,7 +73,7 @@ class Timeline_sample:
 
 
 @dataclass(frozen=True)
-class Academy_timeline:
+class School_timeline:
     initial_scene: str
     duration: float
     samples: tuple[Timeline_sample, ...]
@@ -98,7 +98,7 @@ class Academy_timeline:
         object.__setattr__(self, "duration", duration)
         object.__setattr__(self, "samples", samples)
         if self.performance is not None:
-            from .academy_performance import Performance
+            from .school_performance import Performance
             performance = _snapshot(self.performance)
             object.__setattr__(self, "performance", performance)
             object.__setattr__(self, "_performance_controller", Performance.from_dict(performance))
@@ -154,13 +154,13 @@ class Academy_timeline:
 def load_timeline(path):
     data = json.loads(Path(path).read_text())
     if not isinstance(data, dict) or data.get("version") != 1:
-        raise ValueError("Unsupported Academy timeline version")
+        raise ValueError("Unsupported School timeline version")
     try:
-        return Academy_timeline(data["initial_scene"], data["duration"],
+        return School_timeline(data["initial_scene"], data["duration"],
             tuple(Timeline_sample(item["time"], item["values"]) for item in data["samples"]),
             data.get("performance"))
     except (KeyError, TypeError) as error:
-        raise ValueError("Invalid Academy timeline structure") from error
+        raise ValueError("Invalid School timeline structure") from error
 
 
 def save_rehearsal_as(source, destination) -> Path:
@@ -252,7 +252,7 @@ class Rehearsal:
         duration = _finite_number(duration, "Timeline duration")
         if self._last_seen is not None and duration < self._last_seen.time:
             raise ValueError("Timeline duration cannot precede the last rehearsal tick")
-        return Academy_timeline(self.initial_scene, duration, tuple(self.samples), self.performance)
+        return School_timeline(self.initial_scene, duration, tuple(self.samples), self.performance)
 
     def save(self, path, duration):
         timeline = self.finish(duration)

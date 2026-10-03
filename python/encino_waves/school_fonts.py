@@ -1,5 +1,5 @@
 # Copyright 2026 Christopher Jon Horvath. Apache-2.0.
-"""Font assets for Academy text overlays, independent of the viewer UI font."""
+"""Font assets for School text overlays, independent of the viewer UI font."""
 from pathlib import Path
 
 

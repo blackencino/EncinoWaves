@@ -1,6 +1,6 @@
 # GPU implementation
 
-The Python implementation is on `academy/gpu-showcase`. The C++ library and
+The Python implementation is on `school/gpu-showcase`. The C++ library and
 OpenGL viewer remain available in `src/` as the historical reference.
 
 ## API choice
@@ -391,7 +391,7 @@ poorly commensurate two-domain experiment above.
 
 ## Presentation rendering
 
-The Academy presentation work changes rendering, secondary foam, and the
+The School presentation work changes rendering, secondary foam, and the
 separately requested trough appearance filter described above. The spectral
 wave formulation and phase evolution are unchanged. Fixed-state material
 comparisons use identical displacement, normal and foam arrays.
@@ -536,12 +536,12 @@ same portable wgpu path, without additional Metal-specific rendering code.
 ### Optional foam fringe
 
 The foam fringe is consolidated with the rendering and UI work on
-`academy/gpu-showcase`. `Look.crest_crumble` defaults to false; the viewer's
+`school/gpu-showcase`. `Look.crest_crumble` defaults to false; the viewer's
 **Camera & light → Crest treatment** selector offers Off and Foam fringe.
 `scenes/foam_fringe.json` opens with it enabled at 2048 waves / 1024 foam.
 The geometric crest wrinkle was excluded. Imports ignore its retired setting
 so scenes saved during that study retain their other controls and foam history.
-The previously rendered Academy master is preserved without a new render.
+The previously rendered School master is preserved without a new render.
 
 The first version was visually ineffective: a faint reflection perturbation
 retired beyond a 0.65 m pixel footprint. The revised material forms visible,
@@ -674,7 +674,7 @@ fields: height 92.5 m, pitch −15.4°, heading −487.6°, with the center of i
 on the sea at the origin. Camera interpolation follows the shorter heading arc,
 interpolates the pivot and orbit distance, and preserves exact endpoint views.
 
-### Continuous Academy presentation
+### Continuous School presentation
 
 `presentation.py` describes a 300-second sequence of immutable target values.
 Each cue changes exactly one of wind speed, fetch, swell, depth, camera, or

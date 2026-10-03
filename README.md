@@ -19,19 +19,18 @@ If this worktree shares another checkout's virtual environment, prefix the
 Python commands below with `PYTHONPATH=python` so they use this branch's source.
 The viewer launcher already does this.
 
-Rendering polish, the continuous Academy presentation, and the optional foam
-fringe are consolidated on `academy/gpu-showcase`. Use this checkout for the
+Rendering polish, the continuous School presentation, and the optional foam
+fringe are consolidated on `school/gpu-showcase`. Use this checkout for the
 viewer; the separate visual-polish and crest-study worktrees have been retired.
 The geometric crest wrinkle is excluded.
 
-### Academy rehearsal viewer
+### School rehearsal viewer
 
-Run `./run_academy_viewer.command` for the separate Academy presentation viewer.
+Run `./run_school_viewer.command` for the separate School presentation viewer.
 It opens a large, resizable **16:9** preview fitted to the desktop, including on
 Retina displays. Movie output remains fixed at **1920×1080**.
-The controls stay within **y=200–880**, applying the Academy artwork diagram's
-400-pixel UHD top/bottom clearance proportionally to HD. This is a conservative
-layout choice for the presentation, not a separate video-title-safe requirement.
+The controls stay within **y=200–880**, reserving 200 pixels of clearance at
+the top and bottom of the HD frame for a conservative presentation layout.
 
 Startup is an unrecorded preparation view: adjust the sea and camera first.
 Pressing R first builds six seconds of foam history, then starts a four-second black **Encino Waves / Interactive Ocean Synthesis**
@@ -39,7 +38,7 @@ title card with **Christopher Jon Horvath** beneath the subtitle, followed by a
 smooth reveal. The default sea has a 1024 m domain,
 17 m/s wind, 100 m depth, 300 km fetch, trough damping 1, and half-strength foam
 fringe. The camera is 145.2 m high, pitch −18.1°, heading −139.9°.
-Academy presets use **40.735° vertical / 66.850° horizontal FOV**: a 20 mm
+School presets use **40.735° vertical / 66.850° horizontal FOV**: a 20 mm
 rectilinear lens equivalent on the [ALEXA Mini's 26.40×14.85 mm UHD image area](https://www.arri.com/en/cine-systems/cine-cameras/legacy-cine-cameras/alexa-mini).
 This adapts the wide end of Russell Boyd's camera-barge lens choice in
 [*Master and Commander*](https://theasc.com/article/hell-high-water-master-commander/)
@@ -75,7 +74,7 @@ of preview frame rate. **Tab** opens setup/files, including **Reset opening ocea
 Each recording starts its title card again from the currently configured sea.
 Keep each rehearsal folder intact: its starting scene and foam checkpoints live
 beside the timeline. The default location is the gitignored
-`renders/academy_YYYYMMDD_HHMMSS_<unique>/rehearsal.json`. Rehearsals autosave once
+`renders/school_YYYYMMDD_HHMMSS_<unique>/rehearsal.json`. Rehearsals autosave once
 per second. **Save recording as** in setup copies the take and its checkpoints to
 the chosen location; **Open rehearsal** reopens a saved take for rendering.
 
@@ -84,15 +83,15 @@ recorded camera, lighting, at least 1024² foam, and presentation overlays. Outp
 **H.264 High MOV**, 80 Mbps target / 120 Mbps maximum, with an explicit sRGB to
 Rec.709 conversion. One second of black at each end leaves **4:58** for rehearsal
 content within the five-minute limit. The session's recording buttons are omitted
-from the movie. Render progress is in `renders/academy_export.log`.
+from the movie. Render progress is in `renders/school_export.log`.
 
 ```sh
-./run_academy_viewer.command
-.venv/bin/python -m encino_waves academy-render renders/your_take/rehearsal.json renders/academy.mov
+./run_school_viewer.command
+.venv/bin/python -m encino_waves school-render renders/your_take/rehearsal.json renders/school.mov
 ```
 
 These renders are picture-only. Add the presenter's narration and a synchronized
-SRT or WebVTT file before submission; overlay text is not a closed-caption track.
+SRT or WebVTT file before sharing; overlay text is not a closed-caption track.
 For a separate phone voice memo, start audio first and say a short sync cue while
 pressing R. Leave that cue in the original memo for alignment. The rendered
 timeline begins after the movie's one-second black head; account for that offset
@@ -268,7 +267,7 @@ of playback speed. Movie exports run in a separate process; progress is in
 .venv/bin/python -m encino_waves render renders/shot.mp4 --scene renders/your_scene.json --seconds 15 --resolution 2048
 .venv/bin/python -m encino_waves render renders/comparison.mp4 --compare --seconds 10
 PYTHONPATH=python .venv/bin/python -m encino_waves demo renders/review.mp4 --preview --resolution 2048 --width 1920 --height 1080
-PYTHONPATH=python .venv/bin/python -m encino_waves demo renders/academy.mp4 --resolution 4096 --foam-resolution 1024 --width 3840 --height 2160
+PYTHONPATH=python .venv/bin/python -m encino_waves demo renders/school.mp4 --resolution 4096 --foam-resolution 1024 --width 3840 --height 2160
 ```
 
 `demo` is exactly five minutes at 24 fps, with no cuts or reseeds. It starts in
@@ -282,7 +281,7 @@ fetch and high swell give **Lawful evil**. Reducing swell, then depth to 1.5 m,
 reveals shallow chop. The film visits all four compositions, including Sunset,
 while lighting remains fixed. These are smooth edits of the spectral conditions,
 not a simulation of the time a real sea takes to respond to changing weather.
-Academy exports default to **4096² waves and 1024² foam**; `--resolution 2048`
+School exports default to **4096² waves and 1024² foam**; `--resolution 2048`
 is also suitable for a lighter export. Image dimensions are independent: the
 command above writes a 3840×2160 movie. The interactive viewer retains its
 existing defaults.

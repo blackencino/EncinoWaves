@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from encino_waves import academy_viewer, viewer as base_viewer
-from encino_waves.academy_timeline import Rehearsal
-from encino_waves.academy_viewer import AcademyViewer, _GuiCanvas, WIDTH, HEIGHT
+from encino_waves import school_viewer, viewer as base_viewer
+from encino_waves.school_timeline import Rehearsal
+from encino_waves.school_viewer import SchoolViewer, _GuiCanvas, WIDTH, HEIGHT
 from encino_waves.camera import frame_domain
 from encino_waves.editing import make_wave_basis, state_from_basis
 from encino_waves.foam import Foam_parameters
@@ -18,7 +18,7 @@ from encino_waves.render import Look
 
 @pytest.fixture
 def replay(monkeypatch):
-    result = AcademyViewer.__new__(AcademyViewer)
+    result = SchoolViewer.__new__(SchoolViewer)
     result.replay = True
     result.replay_elapsed = 1/24
     result.render_resolution = None
@@ -50,7 +50,7 @@ def replay(monkeypatch):
     io = SimpleNamespace(mouse_pos=SimpleNamespace(x=1440, y=500),
                          add_mouse_pos_event=lambda *point: positions.append(point),
                          mouse_draw_cursor=False)
-    monkeypatch.setattr(academy_viewer.imgui, "get_io", lambda: io)
+    monkeypatch.setattr(school_viewer.imgui, "get_io", lambda: io)
     result._test_positions = positions
     return result
 
@@ -210,9 +210,9 @@ def test_retina_canvas_locks_physical_size_and_title_safe_panel():
     dimensions = []
     canvas = SimpleNamespace(get_pixel_ratio=lambda: 2,
                              set_logical_size=lambda *size: dimensions.append(size))
-    AcademyViewer._fit_canvas(canvas)
+    SchoolViewer._fit_canvas(canvas)
     assert dimensions == [(960, 540)]
-    viewer = AcademyViewer.__new__(AcademyViewer)
+    viewer = SchoolViewer.__new__(SchoolViewer)
     x, y, width, height = viewer._control_panel_rect(960, 540)
     assert 0 <= x < x+width <= WIDTH
     assert 200 <= y < y+height <= 880

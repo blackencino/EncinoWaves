@@ -6,8 +6,8 @@ import json
 import numpy as np
 import pytest
 
-from encino_waves.academy_timeline import (
-    Academy_timeline, MAX_REHEARSAL_SECONDS, Rehearsal, Timeline_sample,
+from encino_waves.school_timeline import (
+    School_timeline, MAX_REHEARSAL_SECONDS, Rehearsal, Timeline_sample,
     load_timeline, playback_delta,
 )
 from encino_waves.camera import frame_domain, interpolate_camera
@@ -70,7 +70,7 @@ def test_seek_and_target_controls_step_instead_of_interpolating():
     first = snapshot()
     last = snapshot(parameters={"wind_speed": 30}, seek_serial=1, seek_time=50,
                     camera=asdict(replace(frame_domain(512), yaw=45)))
-    timeline = Academy_timeline("initial.json", 2,
+    timeline = School_timeline("initial.json", 2,
         (Timeline_sample(0, first), Timeline_sample(2, last)))
     middle = timeline.sample(1)
     assert middle["parameters"] == first["parameters"]
@@ -130,7 +130,7 @@ def test_duration_limit_reserves_black_head_and_tail():
 
 
 def test_failed_autosave_preserves_previous_tape(tmp_path, monkeypatch):
-    from encino_waves import academy_timeline
+    from encino_waves import school_timeline
     rehearsal = Rehearsal("initial.json", snapshot())
     path = tmp_path/"rehearsal.json"
     rehearsal.save(path, 1)
@@ -143,7 +143,7 @@ def test_failed_autosave_preserves_previous_tape(tmp_path, monkeypatch):
         assert destination == path
         raise OSError("Autosave interrupted")
 
-    monkeypatch.setattr(academy_timeline.os, "replace", interrupted_replace)
+    monkeypatch.setattr(school_timeline.os, "replace", interrupted_replace)
     with pytest.raises(OSError, match="interrupted"):
         rehearsal.save(path, 3)
     assert path.read_bytes() == previous

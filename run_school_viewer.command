@@ -6,4 +6,4 @@ if [[ ! -x .venv/bin/python ]]; then
     exit 1
 fi
 export PYTHONPATH="$PWD/python${PYTHONPATH:+:$PYTHONPATH}"
-exec .venv/bin/python -m encino_waves academy-view "$@"
+exec .venv/bin/python -m encino_waves school-view "$@"

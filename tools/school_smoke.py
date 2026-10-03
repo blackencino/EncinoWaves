@@ -1,4 +1,4 @@
-"""One focused GPU check of the Academy performance and movie path."""
+"""One focused GPU check of the School performance and movie path."""
 from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
@@ -7,15 +7,15 @@ import numpy as np
 from PIL import Image
 from rendercanvas.offscreen import RenderCanvas
 
-from encino_waves.academy_viewer import AcademyViewer
-from encino_waves.academy_performance import Performance
-from encino_waves.academy_timeline import Rehearsal
+from encino_waves.school_viewer import SchoolViewer
+from encino_waves.school_performance import Performance
+from encino_waves.school_timeline import Rehearsal
 
 
-directory = Path("renders/academy_performance_check")
+directory = Path("renders/school_performance_check")
 directory.mkdir(parents=True, exist_ok=True)
 canvas = RenderCanvas(size=(960, 540), pixel_ratio=2)
-viewer = AcademyViewer(canvas=canvas)
+viewer = SchoolViewer(canvas=canvas)
 clock = [0.0]
 viewer._wall_time = lambda: clock[0]
 
@@ -92,7 +92,7 @@ try:
     recorder = Rehearsal("initial_scene.json", initial)
     recorder.set_performance(viewer.performance.to_dict())
     recorder.save(directory / "rehearsal.json", 8)
-    print("Academy title, 2K/1K opening, inertia, examples, unchanged Maya input, endpoint playback and tape replay passed", flush=True)
+    print("School title, 2K/1K opening, inertia, examples, unchanged Maya input, endpoint playback and tape replay passed", flush=True)
 finally:
     viewer.executor.shutdown(wait=True, cancel_futures=True)
     canvas.close()

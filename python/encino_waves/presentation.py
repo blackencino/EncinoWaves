@@ -111,7 +111,7 @@ def sample_presentation(presentation,time):
     raise AssertionError("Unreachable presentation time")
 
 
-def academy_presentation(resolution=4096,foam_resolution=1024,*,preview=False):
+def school_presentation(resolution=4096,foam_resolution=1024,*,preview=False):
     """Five minutes, one kilometre, no cuts, reseeds or simultaneous controls.
 
     Preview compresses the authored timings to one minute. Propagation still

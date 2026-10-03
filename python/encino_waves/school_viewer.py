@@ -1,5 +1,5 @@
 # Copyright 2026 Christopher Jon Horvath. Apache-2.0.
-"""Fixed-format Academy presentation viewer, sharing the ordinary viewer's ocean.
+"""Fixed-format School presentation viewer, sharing the ordinary viewer's ocean.
 
 The preview fills most of the desktop while output remains 1920 x 1080.
 ImGui uses output coordinates; camera gestures retain native coordinates.
@@ -19,9 +19,9 @@ from rendercanvas.glfw import RenderCanvas
 from wgpu.utils.imgui import ImguiRenderer
 
 from .camera import Camera, interpolate_camera
-from .academy_fonts import nimbus_regular
-from .academy_overlays import TITLE_DURATION, draw_title, draw_control, draw_example, draw_telemetry, draw_camera_telemetry, format_control_value
-from .academy_scenes import opening_scene, academy_examples, ACADEMY_FOAM
+from .school_fonts import nimbus_regular
+from .school_overlays import TITLE_DURATION, draw_title, draw_control, draw_example, draw_telemetry, draw_camera_telemetry, format_control_value
+from .school_scenes import opening_scene, school_examples, SCHOOL_FOAM
 from .editing import make_wave_basis, same_wave_basis
 from .foam import Foam_parameters, prepare_foam
 from .model import Wave_parameters
@@ -75,7 +75,7 @@ class _GuiCanvas:
         self.canvas.add_event_handler(mapped, *types, **kwargs)
 
 
-class AcademyViewer(Viewer):
+class SchoolViewer(Viewer):
     def __init__(self, device="auto", sky=None, preset=2, scene=None, *, canvas=None,
                  max_frames=0, replay=False, render_resolution=None):
         self._locking_size = False
@@ -106,7 +106,7 @@ class AcademyViewer(Viewer):
         self._recording_initial_values = None
         self._performance_origin = time.perf_counter()
         canvas = canvas or RenderCanvas(size=(WIDTH, HEIGHT),
-            title="Encino Waves — Academy | 1920 x 1080 | 24 fps",
+            title="Encino Waves — School | 1920 x 1080 | 24 fps",
             update_mode="continuous", max_fps=FPS)
         self._fit_canvas(canvas)
         if hasattr(canvas, "_window"):
@@ -116,7 +116,7 @@ class AcademyViewer(Viewer):
         super().__init__(resolution=render_resolution or 2048, device=device, sky=sky, preset=preset, scene=scene,
                          canvas=canvas, max_frames=max_frames)
         if not scene:
-            self.foam_parameters = ACADEMY_FOAM
+            self.foam_parameters = SCHOOL_FOAM
         self.show_ui = False
         self.canvas.set_update_mode("continuous", max_fps=FPS)
         self.canvas.add_event_handler(self._on_resize, "resize", order=-100)
@@ -148,7 +148,7 @@ class AcademyViewer(Viewer):
         self.overlay_font = imgui.get_io().fonts.add_font_from_file_ttf(str(nimbus_regular()), 42)
 
     def _new_performance(self):
-        from .academy_performance import Performance
+        from .school_performance import Performance
         self.performance = Performance(asdict(self.parameters), initial_look=asdict(self.look))
         self._performance_origin = time.perf_counter()
         self.performance_time = 0.0
@@ -268,8 +268,7 @@ class AcademyViewer(Viewer):
         super().reset_foam()
 
     def _control_panel_rect(self, width, height):
-        # The Academy artwork diagram reserves 400px top/bottom at UHD.
-        # Apply its proportional 200px clearance to presentation UI at HD.
+        # Presentation layout reserves 200px top/bottom at HD.
         return WIDTH - 370 - 48, TITLE_SAFE_TOP, 370, TITLE_SAFE_BOTTOM - TITLE_SAFE_TOP
 
     def _draw_navigation(self, width, height, fixed):
@@ -308,22 +307,22 @@ class AcademyViewer(Viewer):
                 if self.rehearsal_path is None:
                     return
                 default = Path("renders") / (self.rehearsal_path.parent.name + ".json")
-                self.dialog = file_dialogs.save_file("Save Academy recording as", str(default.resolve()),
-                                                    ["Academy recording", "*.json"])
+                self.dialog = file_dialogs.save_file("Save School recording as", str(default.resolve()),
+                                                    ["School recording", "*.json"])
             else:
-                self.dialog = file_dialogs.open_file("Open Academy rehearsal", str(Path("renders").resolve()),
-                                                    ["Academy rehearsal", "*.json"])
+                self.dialog = file_dialogs.open_file("Open School rehearsal", str(Path("renders").resolve()),
+                                                    ["School rehearsal", "*.json"])
             return
         super()._open_file(action)
 
     def _poll_files(self):
-        academy_dialogs = ("rehearsal", "save_rehearsal_as")
-        if self.dialog and self.dialog_action in academy_dialogs and self.dialog.ready(0):
+        school_dialogs = ("rehearsal", "save_rehearsal_as")
+        if self.dialog and self.dialog_action in school_dialogs and self.dialog.ready(0):
             result = self.dialog.result()
             action = self.dialog_action
             self.dialog = None
             if result:
-                from .academy_timeline import load_timeline, save_rehearsal_as
+                from .school_timeline import load_timeline, save_rehearsal_as
                 try:
                     path = Path(result[0] if isinstance(result, list) else result)
                     if action == "save_rehearsal_as":
@@ -336,7 +335,7 @@ class AcademyViewer(Viewer):
                     self.message = str(error)
         exporting = self.movie_process is not None
         # The base poller only handles sky/scene dialogs and its movie process.
-        dialog = self.dialog if self.dialog_action in academy_dialogs else None
+        dialog = self.dialog if self.dialog_action in school_dialogs else None
         if dialog is not None:
             self.dialog = None
         try:
@@ -345,15 +344,15 @@ class AcademyViewer(Viewer):
             if dialog is not None:
                 self.dialog = dialog
         if exporting and self.movie_process is None and "failed" in self.message.lower():
-            self.message = "Academy render failed; see renders/academy_export.log"
+            self.message = "School render failed; see renders/school_export.log"
 
     def draw_gui(self):
         if self.show_ui:
             fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
             imgui.set_next_window_pos((WIDTH - 420, TITLE_SAFE_TOP))
             imgui.set_next_window_size((372, 460))
-            imgui.begin("academy_setup", flags=fixed)
-            self._label("Academy setup", 23, (.92, .94, .92, 1))
+            imgui.begin("school_setup", flags=fixed)
+            self._label("School setup", 23, (.92, .94, .92, 1))
             imgui.text("1024 m patch | 2048 waves | 1024 foam")
             imgui.text("Output: 1080p24 | 4096 waves")
             imgui.text_wrapped("W wind speed, D depth, F fetch, S swell, M foam. Left/right arrows drive the selected control. E advances to the next example. I toggles telemetry. C toggles camera info (preview only).")
@@ -399,7 +398,7 @@ class AcademyViewer(Viewer):
         fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
         imgui.set_next_window_pos((48, TITLE_SAFE_BOTTOM - 128))
         imgui.set_next_window_size((540, 128))
-        imgui.begin("academy_session", flags=fixed)
+        imgui.begin("school_session", flags=fixed)
         if self.rehearsal is not None:
             elapsed = min(298.0, time.perf_counter() - self.rehearsal_started)
             imgui.text(f"Recording decisions   {int(elapsed)//60}:{int(elapsed)%60:02d} / 4:58")
@@ -420,7 +419,7 @@ class AcademyViewer(Viewer):
             if imgui.button("Files / setup (Tab)"):
                 self.show_ui = not self.show_ui
         if self.movie_process is not None:
-            imgui.text("Rendering offline. Progress: renders/academy_export.log")
+            imgui.text("Rendering offline. Progress: renders/school_export.log")
         elif self.rehearsal_path:
             duration = self.last_take_duration
             label = f"CUT {self._clock_text(duration)}  ·  Saved: " if duration is not None else "Saved: "
@@ -488,7 +487,7 @@ class AcademyViewer(Viewer):
         return values
 
     def start_rehearsal(self):
-        from .academy_timeline import Rehearsal
+        from .school_timeline import Rehearsal
         if self.rehearsal is not None or self.changed or self.future is not None or self.movie_process is not None:
             return
         held_keys = set(self._held_keys)
@@ -499,7 +498,7 @@ class AcademyViewer(Viewer):
         if self.comparing and self.comparison_state is not None:
             self.comparison_foam_state = prepare_foam(
                 self.comparison_state, self.time, self.foam_parameters, preroll=FOAM_PREROLL)
-        directory = Path("renders") / (time.strftime("academy_%Y%m%d_%H%M%S") + f"_{time.time_ns() % 1_000_000:06d}")
+        directory = Path("renders") / (time.strftime("school_%Y%m%d_%H%M%S") + f"_{time.time_ns() % 1_000_000:06d}")
         directory.mkdir(parents=True, exist_ok=True)
         initial = directory / "initial_scene.json"
         self.save_scene(initial)
@@ -532,10 +531,10 @@ class AcademyViewer(Viewer):
     def render_rehearsal(self):
         if self.rehearsal_path is None or self.movie_process is not None:
             return
-        output = self.rehearsal_path.with_name(f"academy_{time.time_ns()}.mov")
-        command = [sys.executable, "-m", "encino_waves", "academy-render",
+        output = self.rehearsal_path.with_name(f"school_{time.time_ns()}.mov")
+        command = [sys.executable, "-m", "encino_waves", "school-render",
                    str(self.rehearsal_path), str(output), "--device", self.device_name]
-        self.movie_log = Path("renders/academy_export.log").open("w")
+        self.movie_log = Path("renders/school_export.log").open("w")
         self.movie_process = subprocess.Popen(command, stdout=self.movie_log, stderr=subprocess.STDOUT)
         self.playing = False
         self.message = f"Rendering {output}"
@@ -650,7 +649,7 @@ class AcademyViewer(Viewer):
 
     def _next_example(self, now):
         self._commit_camera(now, force=True)
-        examples = academy_examples(self.parameters.resolution)
+        examples = school_examples(self.parameters.resolution)
         scene = examples[self._next_example_index]
         self._next_example_index = (self._next_example_index + 1) % len(examples)
         self.performance.transition(asdict(scene.parameters), now, duration=3.0, name=scene.name)
@@ -666,7 +665,7 @@ class AcademyViewer(Viewer):
             self.basis = make_wave_basis(self.parameters, self.device_name)
         self.state = state_from_basis(self.basis, self.parameters)
         self.time = 10.0
-        self.foam_parameters = ACADEMY_FOAM
+        self.foam_parameters = SCHOOL_FOAM
         self.reset_foam()
         self.comparing = self.tessendorf_only = False
         self.comparison_state = None
@@ -703,10 +702,10 @@ class AcademyViewer(Viewer):
     def save_still(self):
         directory = Path("renders")
         directory.mkdir(exist_ok=True)
-        name = time.strftime("academy_%Y%m%d_%H%M%S") + f"_{time.time_ns() % 1_000_000_000:09d}"
+        name = time.strftime("school_%Y%m%d_%H%M%S") + f"_{time.time_ns() % 1_000_000_000:09d}"
         width, height = self.canvas.get_physical_size()
         if (width, height) != (WIDTH, HEIGHT):
-            self.message = "The Academy view must be 1920 x 1080 before saving."
+            self.message = "The School view must be 1920 x 1080 before saving."
             return
         rgba = read_rgba(self.device, self.context.get_current_texture(), WIDTH, HEIGHT)
         Image.fromarray(rgba).save(directory / f"{name}.png")

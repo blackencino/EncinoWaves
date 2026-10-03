@@ -6,12 +6,12 @@ import pytest
 from encino_waves.camera import interpolate_camera
 from encino_waves.model import Wave_parameters
 from encino_waves.presets import presentation_views
-from encino_waves.presentation import (Presentation, Cue, academy_presentation,
+from encino_waves.presentation import (Presentation, Cue, school_presentation,
                                       changed_control, sample_presentation)
 
 
-def test_academy_stays_on_one_deep_seeded_patch_and_changes_one_control():
-    movie=academy_presentation()
+def test_school_stays_on_one_deep_seeded_patch_and_changes_one_control():
+    movie=school_presentation()
     assert movie.duration==300
     assert movie.initial.parameters.depth==1000
     assert movie.foam.resolution==1024
@@ -35,7 +35,7 @@ def test_academy_stays_on_one_deep_seeded_patch_and_changes_one_control():
 
 
 def test_camera_and_physical_values_are_continuous_at_every_cue_boundary():
-    movie=academy_presentation()
+    movie=school_presentation()
     time=0.
     for cue in movie.cues[:-1]:
         time+=cue.duration
@@ -64,7 +64,7 @@ def test_sunset_uses_supplied_maya_fields_and_short_camera_arc():
 
 
 def test_timeline_rejects_cuts_and_multiple_physical_edits():
-    movie=academy_presentation(32,32)
+    movie=school_presentation(32,32)
     initial=movie.initial
     for changes in ({"domain":1200},{"seed":999},{"wind_speed":25,"swell":1}):
         target=replace(initial,parameters=replace(initial.parameters,**changes))
@@ -77,8 +77,8 @@ def test_timeline_rejects_cuts_and_multiple_physical_edits():
 
 
 def test_preview_keeps_the_same_endpoints_and_reaches_full_caption_opacity():
-    full=academy_presentation()
-    preview=academy_presentation(preview=True)
+    full=school_presentation()
+    preview=school_presentation(preview=True)
     assert preview.duration==pytest.approx(60)
     elapsed=0
     for a,b in zip(full.cues,preview.cues):

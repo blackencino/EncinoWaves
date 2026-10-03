@@ -1,4 +1,4 @@
-"""Continuous state/history, full-frame comparison and Academy CLI integration."""
+"""Continuous state/history, full-frame comparison and School CLI integration."""
 from dataclasses import replace
 import json
 from types import SimpleNamespace

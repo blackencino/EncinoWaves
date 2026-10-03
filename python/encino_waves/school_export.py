@@ -1,5 +1,5 @@
 # Copyright 2026 Christopher Jon Horvath. Apache-2.0.
-"""Render a recorded Academy UI rehearsal at the fixed submission format."""
+"""Render a recorded School UI rehearsal at the fixed presentation format."""
 from pathlib import Path
 import json
 import math
@@ -31,13 +31,13 @@ REC709_FILTER = (
 )
 
 
-class Academy_movie_writer:
+class School_movie_writer:
     """Fixed 1080p24 H.264 MOV; replace the destination only on success."""
 
     def __init__(self, path, *, overwrite=False):
         self.path = Path(path)
         if self.path.suffix.lower() != ".mov":
-            raise ValueError("Academy output must be a .mov file")
+            raise ValueError("School output must be a .mov file")
         if self.path.exists() and not overwrite:
             raise FileExistsError(f"Output exists: {self.path}; use --overwrite explicitly")
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,14 +68,14 @@ class Academy_movie_writer:
     def _error(self):
         self.error_log.seek(0)
         details = self.error_log.read().decode("utf-8", errors="replace").strip()
-        return RuntimeError("Academy video encoder failed" + (f": {details[-4000:]}" if details else ""))
+        return RuntimeError("School video encoder failed" + (f": {details[-4000:]}" if details else ""))
 
     def write(self, pixels):
         if self.closed:
             raise RuntimeError("Movie writer is closed")
         pixels = np.asarray(pixels)
         if pixels.dtype != np.uint8 or pixels.shape not in ((HEIGHT, WIDTH, 3), (HEIGHT, WIDTH, 4)):
-            raise ValueError(f"Academy frames must be {WIDTH}x{HEIGHT} uint8 RGB or RGBA")
+            raise ValueError(f"School frames must be {WIDTH}x{HEIGHT} uint8 RGB or RGBA")
         try:
             self.process.stdin.write(np.ascontiguousarray(pixels[..., :3]).tobytes())
         except BrokenPipeError as error:
@@ -114,8 +114,8 @@ def render_rehearsal(tape_path, output_path, *, device="auto", overwrite=False, 
     from the presenter. Every content frame samples the tape at an exact 1/24 s.
     """
     from rendercanvas.offscreen import RenderCanvas
-    from .academy_timeline import load_timeline
-    from .academy_viewer import AcademyViewer
+    from .school_timeline import load_timeline
+    from .school_viewer import SchoolViewer
 
     tape_path = Path(tape_path)
     output_path = Path(output_path)
@@ -123,7 +123,7 @@ def render_rehearsal(tape_path, output_path, *, device="auto", overwrite=False, 
     if not math.isfinite(timeline.duration) or not 0 < timeline.duration <= MAX_CONTENT_SECONDS:
         raise ValueError("Rehearsal must contain more than zero and at most 298 seconds")
     if output_path.suffix.lower() != ".mov":
-        raise ValueError("Academy output must be a .mov file")
+        raise ValueError("School output must be a .mov file")
     if output_path.exists() and not overwrite:
         raise FileExistsError(f"Output exists: {output_path}; use --overwrite explicitly")
     initial_scene = Path(timeline.initial_scene)
@@ -136,22 +136,22 @@ def render_rehearsal(tape_path, output_path, *, device="auto", overwrite=False, 
     black_frames = BLACK_SECONDS * FPS
     total_frames = content_frames + 2 * black_frames
     if total_frames > 300 * FPS:
-        raise ValueError("Academy movie would exceed five minutes")
+        raise ValueError("School movie would exceed five minutes")
     canvas = RenderCanvas(size=(WIDTH, HEIGHT), pixel_ratio=1)
     viewer = None
     writer = None
     complete = False
     started = time.perf_counter()
     try:
-        viewer = AcademyViewer(
+        viewer = SchoolViewer(
             device=device, canvas=canvas, scene=initial_scene,
             replay=True, render_resolution=RENDER_RESOLUTION,
         )
-        writer = Academy_movie_writer(output_path, overwrite=overwrite)
+        writer = School_movie_writer(output_path, overwrite=overwrite)
         black = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
         for _ in range(black_frames):
             writer.write(black)
-        progress(f"Rendering Academy rehearsal: {content_frames} content frames, 1920x1080 at 24 fps")
+        progress(f"Rendering School rehearsal: {content_frames} content frames, 1920x1080 at 24 fps")
         for index in range(content_frames):
             elapsed = index / FPS
             viewer.apply_rehearsal_sample(timeline.sample(elapsed))
@@ -161,7 +161,7 @@ def render_rehearsal(tape_path, output_path, *, device="auto", overwrite=False, 
             # Rendercanvas logs draw callback failures rather than propagating
             # them; never silently encode its cached image as a fresh frame.
             if pixels is None or viewer.frames != previous_frames + 1:
-                raise RuntimeError(f"Academy viewer did not render frame {index}")
+                raise RuntimeError(f"School viewer did not render frame {index}")
             writer.write(pixels)
             if index and index % (FPS * 5) == 0:
                 progress(f"  {elapsed:.0f}/{timeline.duration:g} s rendered")
@@ -178,7 +178,7 @@ def render_rehearsal(tape_path, output_path, *, device="auto", overwrite=False, 
             canvas.close()
 
     manifest = {
-        "type": "academy_rehearsal", "source": str(tape_path.resolve()),
+        "type": "school_rehearsal", "source": str(tape_path.resolve()),
         "width": WIDTH, "height": HEIGHT, "fps": FPS, "frames": total_frames,
         "content_frames": content_frames, "content_seconds": content_frames / FPS,
         "black_head_seconds": BLACK_SECONDS, "black_tail_seconds": BLACK_SECONDS,
