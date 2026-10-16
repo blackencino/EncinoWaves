@@ -12,7 +12,8 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const output = resolve(process.env.SMOKE_OUTPUT || resolve(root, '../renders/web-smoke'));
+const output = resolve(process.env.SMOKE_OUTPUT || resolve(root,
+  process.argv.includes('--simulation') ? '../renders/web-simulation' : '../renders/web-smoke'));
 const mount = '/EncinoWaves/';
 const mime = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   '.mjs':'text/javascript', '.json':'application/json', '.jpg':'image/jpeg',
