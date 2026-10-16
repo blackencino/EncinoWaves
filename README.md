@@ -1,5 +1,19 @@
 ## EncinoWaves
 
+### School web preview
+
+Try the live ocean at **https://blackencino.github.io/EncinoWaves/**.
+The browser edition starts from `school/gpu-showcase` and preserves the School
+sky, authored seas, camera, and performance controls. It runs locally on WebGL 2
+with 256², 512², and 1024² waves; recording and movie export are omitted.
+Choose **Controls → Quality → High** for the closest laptop rendering, or
+**Light** on a phone. See [web preview development and deployment](docs/WEB_PREVIEW.md).
+
+```sh
+python3 -m http.server 8000 --directory web
+# Open http://localhost:8000
+```
+
 This branch adds a functional Python GPU implementation and a native viewer.
 Ocean compute uses **PyTorch: Metal on Apple silicon, CUDA on NVIDIA**. Graphics
 use **wgpu: Metal, Vulkan, or D3D12**. The original C++ source remains in `src/`.

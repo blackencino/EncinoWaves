@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>School spectral GPU parity check</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>body{background:#101820;color:#dceefa;font:15px monospace;padding:2rem}pre{white-space:pre-wrap}</style>
+<h1>School spectral GPU parity check</h1>
+<canvas id="gpu" width="16" height="16"></canvas>
+<pre id="output">Running…</pre>
+<script type="module">
+import {WaveSimulation,randomVariates} from '../simulation.js';
+const output=document.querySelector('#output');
+const results=[];
+try {
+  const gl=document.querySelector('#gpu').getContext('webgl2');
+  if(!gl) throw new Error('WebGL 2 unavailable');
+  const fixture=await (await fetch('./reference.json')).json();
+  const sim=new WaveSimulation(gl,fixture.resolution);
+  const read=(texture)=>{
+    const fb=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);
+    const data=new Float32Array(fixture.resolution**2*4);gl.readPixels(0,0,fixture.resolution,fixture.resolution,gl.RGBA,gl.FLOAT,data);
+    const error=gl.getError();gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.deleteFramebuffer(fb);
+    if(error) throw new Error('GPU readback failed: '+error);
+    return data;
+  };
+  const compare=(actual,reference,label)=>{
+    let sum=0,maximum=0;
+    for(let i=0;i<actual.length;i++) {
+      const difference=Math.abs(actual[i]-reference[i]);
+      if(!Number.isFinite(difference)) throw new Error(label+' contains nonfinite values');
+      sum+=difference*difference;maximum=Math.max(maximum,difference);
+    }
+    const rmse=Math.sqrt(sum/actual.length);
+    results.push({label,rmse,maximum});
+    if(rmse>.003 || maximum>.02) throw new Error(label+' diverges from Python: '+JSON.stringify({rmse,maximum}));
+  };
+  for(let i=0;i<fixture.cases.length;i++) {
+    const c=fixture.cases[i];sim.update(c.dt,c.parameters);
+    compare(read(sim.displacement),c.displacement,'displacement '+i);
+    compare(read(sim.normal),c.normal,'normal '+i);
+  }
+  const variates=randomVariates(.1,-.2,54321);
+  const expected=[-.9266252707198547,.38899938899406633,.46060218204398157,4.745353914832242];
+  if(variates.some((v,i)=>Math.abs(v-expected[i])>1e-14)) throw new Error('PCG seed mismatch');
+  sim.dispose();
+  window.testResult={passed:true,results};
+  output.textContent='PASS\n'+JSON.stringify(window.testResult,null,2);
+} catch(error) {
+  window.testResult={passed:false,error:error.stack,results};
+  output.textContent='FAIL\n'+error.stack+'\n'+JSON.stringify(results,null,2);
+}
+</script>

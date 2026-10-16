@@ -1,0 +1,20 @@
+Dutch Skies 360 — Autumn Pack 01, 03a
+Photography copyright Bob Groothuis.
+
+The School web preview uses this sky with permission from the rights holder,
+as confirmed by Christopher Jon Horvath for this publication. The photograph
+and derived sky/reflection images are separate from the Apache-2.0 source-code
+license. This repository does not grant reuse rights to the photograph.
+
+Source: DS360_Autumn_Pack_01_03a_Ref.hdr (4000 × 2000).
+Derived assets: school-sky.png, school-reflection.png, sky.json lighting data.
+The sky is resized to 2048 × 1024 and reprojected with the same 10-degree
+horizon trim used by the native School viewer. GGX reflection convolution
+uses 128 importance samples, matching the native filtering method.
+
+PNG RGB stores sqrt(linear HDR radiance / the scale in sky.json), with
+ordinary linear-light mipmaps for the sky and GGX roughness mipmaps for
+reflections, arranged as vertical atlases. They are data textures, not
+ordinary display images. Source HDRs are not included in this web bundle.
+
+Rebuild using tools/build_web_sky.py and a separately supplied licensed source.

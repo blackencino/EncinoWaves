@@ -1,0 +1,18 @@
+EncinoWaves
+Copyright 2015-2026 Christopher Jon Horvath
+
+The display transform in renderer.js, ported from the native viewer,
+adapts Khronos PBR Neutral, adds explicit exposure and
+sRGB output conversion, and is distributed under the Apache License 2.0.
+Upstream: https://github.com/KhronosGroup/ToneMapping
+License: https://github.com/KhronosGroup/ToneMapping/blob/main/LICENSE.md
+
+The analytical environment BRDF in ocean.wgsl follows Brian Karis's
+"Physically Based Shading on Mobile" (Epic Games, 2014), with a bounded
+dielectric smooth-surface limit. Epic's article permits use, modification,
+and distribution of its code samples.
+https://www.unrealengine.com/blog/physically-based-shading-on-mobile
+
+This web preview includes derived Dutch Skies 360 environment data with
+permission. These assets are separately licensed, not Apache-2.0; see
+assets/SKY-LICENSE.txt. The original commercial HDR is not included.

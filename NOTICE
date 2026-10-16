@@ -13,5 +13,7 @@ dielectric smooth-surface limit. Epic's article permits use, modification,
 and distribution of its code samples.
 https://www.unrealengine.com/blog/physically-based-shading-on-mobile
 
-Commercial HDR environments are supplied separately by the user. No Dutch
-Skies images or other licensed environment data are distributed here.
+The web preview includes derived Dutch Skies 360 environment data with
+permission. These assets are separately licensed, not Apache-2.0; see
+web/assets/SKY-LICENSE.txt. Original commercial HDR files for the native
+viewer are supplied separately by the user.
