@@ -8,3 +8,26 @@ renders/*
 assets/local
 imgui.ini
 .DS_Store
+
+# Private presentation material belongs outside this repository.
+/artifacts/
+AcademySciTech*
+*.ppt
+*.pptx
+*.pptm
+*.potx
+*.key
+*.eml
+*.msg
+*.pdf
+
+# Review media belongs in the private presentation workspace.
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.webm
+*.avi
+*.mpeg
+*.mpg
+*.wmv
