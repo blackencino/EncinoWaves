@@ -2,12 +2,15 @@
 import {SchoolControls,controls,scenes,position,formatValue,cameraGesture,clamp} from './controls.js';
 import {WaveSimulation} from './simulation.js';
 import {OceanRenderer} from './renderer.js';
+import {initialQuality,IPhoneQualityGuard} from './quality.js';
 
 const $=id=>document.getElementById(id),canvas=$('ocean'),state=new SchoolControls();
 const profiles={low:{resolution:256,pixels:1000000,ratio:1,mesh:[240,144]},medium:{resolution:512,pixels:1800000,ratio:1.5,mesh:[400,240]},high:{resolution:1024,pixels:3200000,ratio:2,mesh:[640,384]}};
 const mobile=navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<850;
 const requested=new URLSearchParams(location.search).get('quality');
-let quality=requested in profiles?requested:(mobile?'low':'medium');
+const initial=initialQuality({requested,userAgent:navigator.userAgent,platform:navigator.platform,maxTouchPoints:navigator.maxTouchPoints,width:screen.width,height:screen.height});
+let quality=initial.quality,qualitySource=initial.source;
+const qualityGuard=new IPhoneQualityGuard();
 let gl,simulation,renderer,ready=false,playing=true,error=null,frames=0,previous=0,lastUi=0,now=0,fps=0,frameTime=0;
 let changingQuality=false,firstReady=0,lastPointer=0,sceneNotice=-10,pointer=null,contextLost=false,slowTime=0,pixelScale=1;
 const look={exposure:.55,sky_rotation:25,sky_gain:1,haze:.9,foam:1,crest_threshold:.5,crest_maximum:1.1,aeration:1.25,crest_crumble:true,crest_crumble_strength:.5};
@@ -58,7 +61,7 @@ document.addEventListener('keydown',e=>{
   else if(key==='h')cleanMode();
 });
 document.addEventListener('keyup',e=>{if(e.key==='ArrowLeft')state.held.left=false;if(e.key==='ArrowRight')state.held.right=false;});
-window.addEventListener('blur',clearHeld);document.addEventListener('visibilitychange',()=>{clearHeld();previous=0;});
+window.addEventListener('blur',clearHeld);document.addEventListener('visibilitychange',()=>{clearHeld();previous=0;qualityGuard.reset();});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 canvas.addEventListener('pointerdown',e=>{if(!ready)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);pointer={id:e.pointerId,x:e.clientX,y:e.clientY,kind:e.ctrlKey||e.button===1?'track':e.shiftKey||e.button===2?'dolly':'orbit'};state.transition=null;});
 canvas.addEventListener('pointermove',e=>{lastPointer=now;document.body.classList.remove('idle');if(!pointer||pointer.id!==e.pointerId)return;const r=canvas.getBoundingClientRect();state.camera=cameraGesture(state.camera,pointer.kind,e.clientX-pointer.x,e.clientY-pointer.y,r.width,r.height);pointer.x=e.clientX;pointer.y=e.clientY;});
@@ -84,20 +87,22 @@ async function warmFoam(){
   // Build the same six seconds of history as the live viewer; yield for UI.
   for(let i=0;i<48;i++){simulation.update(1/8,state.parameters);if(i%8===7)await nextPaint();}
 }
-async function setQuality(name){if(!(name in profiles)||changingQuality||!gl||contextLost)return;changingQuality=true;ready=false;document.body.dataset.ready='false';
+async function setQuality(name,automatic=false){if(!Object.hasOwn(profiles,name)||changingQuality||!gl||contextLost)return;if(!automatic)qualitySource='manual';qualityGuard.reset();changingQuality=true;ready=false;document.body.dataset.ready='false';
   $('loading-message').textContent='Preparing '+name+' quality…';$('loading').hidden=false;$('loading').style.opacity='1';
   try{await nextPaint();simulation?.dispose();quality=name;pixelScale=1;slowTime=0;$('quality').value=name;simulation=new WaveSimulation(gl,profiles[name].resolution);renderer.setMeshResolution(...profiles[name].mesh);await warmFoam();resize();ready=true;document.body.dataset.ready='true';$('loading').hidden=true;previous=0;}catch(e){fail(e);}finally{changingQuality=false;}
 }
 function tick(timestamp){requestAnimationFrame(tick);if(!ready||contextLost||document.hidden){previous=0;return;}
-  const seconds=timestamp*.001,dt=previous?Math.min(.1,seconds-previous):1/60;previous=seconds;now=seconds;
+  const seconds=timestamp*.001,frameSeconds=previous?seconds-previous:1/60,dt=Math.min(.1,frameSeconds);previous=seconds;now=seconds;
   try{state.update(dt,now);simulation.update(playing?dt:0,state.parameters);look.foam=state.parameters.foam_amount;resize();renderer.render(simulation,state.camera,look,canvas.width,canvas.height,simulation.time);frames++;frameTime=frameTime?frameTime*.95+dt*.05:dt;fps=1/frameTime;
     if(now-lastUi>.1){refreshUi();lastUi=now;}if(now-firstReady>12&&now-lastPointer>6)document.body.classList.add('idle');
     // Keep authored waves intact; reduce display pixels if sustained GPU load is high.
     if(playing&&dt>.045&&quality!=='low')slowTime+=dt;else slowTime=Math.max(0,slowTime-dt);
     if(slowTime>5&&pixelScale>.65){pixelScale=Math.max(.65,pixelScale*.85);slowTime=0;}
+    const automaticQuality=qualityGuard.sample(frameSeconds,{quality,source:qualitySource,playing});
+    if(automaticQuality)setQuality(automaticQuality,true);
   }catch(e){fail(e);}
 }
-window.__school={getState:()=>({ready,playing,parameters:{...state.parameters},camera:{...state.camera},quality,time:simulation?.time||0,frames,scene:state.scene,renderer:'WebGL 2',error}),setScene:index=>setScene(index),setQuality};
+window.__school={getState:()=>({ready,playing,parameters:{...state.parameters},camera:{...state.camera},quality,qualitySource,resolution:simulation?.resolution||0,time:simulation?.time||0,frames,scene:state.scene,renderer:'WebGL 2',error}),setScene:index=>setScene(index),setQuality};
 async function start(){
   try{gl=canvas.getContext('webgl2',{alpha:false,antialias:true,depth:true,powerPreference:mobile?'default':'high-performance',preserveDrawingBuffer:false});
     if(!gl)throw new Error('This viewer needs WebGL 2. Try a current Safari, Chrome, Edge, or Firefox with graphics acceleration enabled.');
