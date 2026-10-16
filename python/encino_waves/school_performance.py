@@ -157,8 +157,10 @@ def _overlay(state, time):
         opacity = state["exit_opacity"]*(1-_quintic((time-state["exit_time"])/.22))
     elif mode == "examples" and state["example_name"]:
         opacity *= 1-_quintic((time-state["example_time"]-3.0)/.4)
-    elif not any(state["held"].values()):
+    elif mode == "examples" and not any(state["held"].values()):
         opacity *= 1-_quintic((time-state["last_input"]-IDLE_SECONDS)/.3)
+    # A selected parameter remains visible until its hotkey toggles it off or
+    # another control replaces it. Idle fading belongs only to example titles.
     if mode == "examples":
         return {"mode": mode, "label": state["example_name"] or "Examples", "opacity": opacity,
                 "left_weight": 0.0, "right_weight": 0.0, "value": None}

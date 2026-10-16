@@ -11,6 +11,9 @@ WIDTH, HEIGHT = 1920, 1080
 TITLE_HOLD = 4.0
 TITLE_FADE = 0.45
 TITLE_DURATION = TITLE_HOLD + TITLE_FADE
+INFO_LEFT, INFO_TOP, INFO_WIDTH = 48.0, 48.0, 548.0
+_CONTROL_KEYS = {"wind": "W", "depth": "D", "fetch": "F", "swell": "S",
+                 "foam": "M", "gain": "G", "pinch": "P", "historical_pinch": "P"}
 # A small Gaussian-like kernel produces a diffuse shadow, rather than a
 # single crisp offset that makes the lettering look embossed.
 _SHADOW_KERNEL = ((-4.0, 1), (-2.0, 4), (0.0, 6), (2.0, 4), (4.0, 1))
@@ -128,30 +131,39 @@ def _arrow(x, y, direction, weight, opacity):
                       thickness)
 
 
-def draw_control(font, overlay):
-    """Draw ``label`` with arrows driven by ``left_weight/right_weight``.
+def _info_box(height, opacity):
+    imgui.get_foreground_draw_list().add_rect_filled(
+        (INFO_LEFT, INFO_TOP), (INFO_LEFT + INFO_WIDTH, INFO_TOP + height),
+        _color(.025, .035, .04, opacity * .72), 10.0)
 
-    ``opacity`` and arrow weights are normalized floats. Optional ``value_text``
-    (or ``value``) appears below the label, safely above the bottom clearance.
-    """
+
+def draw_control(font, overlay):
+    """Keep the selected control in the upper-left, with motion-weighted arrows."""
     if not overlay:
         return
     opacity = _unit(overlay.get("opacity", 1.0))
     label = str(overlay.get("label", ""))
     if not label or opacity <= 0:
         return
-    extent = _centered_text(font, 64.0, label, 734.0, opacity)
-    half_width = extent.x * 0.5
-    y = 734.0 + extent.y * 0.5
-    _arrow(WIDTH * 0.5 - half_width - 70.0, y, -1,
+    _info_box(184.0, opacity)
+    key = _CONTROL_KEYS.get(overlay.get("mode"), "")
+    _text(font, 34.0, label, INFO_LEFT + 24, INFO_TOP + 18, opacity, shadow=False)
+    _text(font, 24.0, key, INFO_LEFT + INFO_WIDTH - 44, INFO_TOP + 24,
+          opacity * .65, shadow=False)
+    y = INFO_TOP + 94
+    _arrow(INFO_LEFT + 54, y, -1,
            overlay.get("left_weight", 0.0), opacity)
-    _arrow(WIDTH * 0.5 + half_width + 70.0, y, 1,
+    _arrow(INFO_LEFT + INFO_WIDTH - 54, y, 1,
            overlay.get("right_weight", 0.0), opacity)
     value = overlay.get("value_text", overlay.get("value"))
     if value is not None and str(value):
         if isinstance(value, (float, int)):
             value = format_control_value(overlay.get("mode", ""), value)
-        _centered_text(font, 44.0, str(value), 814.0, opacity * 0.90)
+        extent = _text_size(font, 42.0, str(value))
+        _text(font, 42.0, str(value), INFO_LEFT + (INFO_WIDTH - extent.x) * .5,
+              INFO_TOP + 72, opacity, shadow=False)
+    _text(font, 24.0, f"Arrows adjust  ·  {key} closes", INFO_LEFT + 24,
+          INFO_TOP + 146, opacity * .70, shadow=False)
 
 
 def draw_example(font, name, opacity):
@@ -160,26 +172,61 @@ def draw_example(font, name, opacity):
         _centered_text(font, 64.0, str(name), 756.0, _unit(opacity))
 
 
-def draw_telemetry(font, parameters, opacity):
-    """Show the currently displayed sea conditions in the title-safe area."""
+def _telemetry_rows(parameters, foam):
+    rows = [("wind", "Wind Speed", parameters.wind_speed),
+            ("depth", "Ocean Depth", parameters.depth)]
+    if parameters.spectrum == "phillips":
+        return rows + [("gain", "Phillips Gain", parameters.phillips_amplitude),
+                       ("historical_pinch", "Pinch", parameters.phillips_pinch)]
+    return rows + [("fetch", "Fetch", parameters.fetch_km),
+                   ("swell", "Swell", parameters.swell),
+                   ("pinch", "Pinch", parameters.pinch),
+                   ("foam", "Foam", foam)]
+
+
+def info_bottom(parameters, telemetry_opacity, overlay):
+    """Reserve room for comparison labels below either upper-left panel."""
+    if telemetry_opacity > 0:
+        return INFO_TOP + (298.0 if parameters.spectrum == "phillips" else 342.0)
+    if overlay and overlay.get("mode") in _CONTROL_KEYS and overlay.get("opacity", 0) > 0:
+        return INFO_TOP + 184.0
+    return INFO_TOP
+
+
+def draw_telemetry(font, parameters, opacity, *, foam=1.0, overlay=None):
+    """Compact sea conditions with persistent highlighting of the active control."""
     opacity = _unit(opacity)
     if opacity <= 0.0:
         return
-    rows = (
-        ("Wind Speed", format_control_value("wind", parameters.wind_speed)),
-        ("Ocean Depth", format_control_value("depth", parameters.depth)),
-        ("Fetch", format_control_value("fetch", parameters.fetch_km)),
-        ("Swell", format_control_value("swell", parameters.swell)),
-    )
-    if parameters.spectrum == "phillips":
-        rows = rows[:2] + (
-            ("Phillips Gain", format_control_value("gain", parameters.phillips_amplitude)),
-            ("Pinch", format_control_value("pinch", parameters.phillips_pinch)),
-        )
-    for row, (label, value) in enumerate(rows):
-        y = 240.0 + row * 80.0
-        _text(font, 52.0, label, 96.0, y, opacity * 0.90)
-        _text(font, 56.0, value, 455.0, y - 2.0, opacity)
+    rows = _telemetry_rows(parameters, foam)
+    historical = parameters.spectrum == "phillips"
+    height = info_bottom(parameters, opacity, overlay) - INFO_TOP
+    _info_box(height, opacity)
+    _text(font, 32.0, "Tessendorf baseline" if historical else "Encino Waves",
+          INFO_LEFT + 24, INFO_TOP + 18, opacity, shadow=False)
+    active = overlay.get("mode") if overlay and overlay.get("active") else None
+    draw = imgui.get_foreground_draw_list()
+    for row, (mode, label, value) in enumerate(rows):
+        y = INFO_TOP + 64 + row * 38
+        selected = mode == active
+        if selected:
+            draw.add_rect_filled((INFO_LEFT + 12, y - 3),
+                                 (INFO_LEFT + INFO_WIDTH - 12, y + 33),
+                                 _color(.50, .72, .82, opacity * .24), 4.0)
+        _text(font, 23.0, _CONTROL_KEYS[mode], INFO_LEFT + 24, y + 3,
+              opacity * (.95 if selected else .50), shadow=False)
+        _text(font, 28.0, label, INFO_LEFT + 62, y,
+              opacity * (1.0 if selected else .78), shadow=False)
+        _text(font, 28.0, format_control_value(mode, value), INFO_LEFT + 310, y,
+              opacity, shadow=False)
+    footer_y = INFO_TOP + 64 + len(rows) * 38 + 8
+    if historical:
+        _text(font, 24.0, "Depth affects speed only", INFO_LEFT + 24, footer_y,
+              opacity * .70, shadow=False)
+        footer_y += 32
+    key = _CONTROL_KEYS.get(active)
+    hint = f"Arrows adjust  ·  {key} closes" if key else "Choose a control  ·  I hides info"
+    _text(font, 24.0, hint, INFO_LEFT + 24, footer_y, opacity * .70, shadow=False)
 
 
 def draw_camera_telemetry(font, camera, opacity):

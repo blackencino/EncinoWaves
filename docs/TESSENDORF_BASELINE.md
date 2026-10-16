@@ -3,8 +3,11 @@
 Press **T** in either native viewer to switch between Encino Waves and the
 early baseline. In School, **G** selects Phillips amplitude gain and **P**
 selects pinching; left/right arrows adjust the selected control. **W** and **D**
-retain wind and depth control. **I** shows gain and pinch in the historical
-telemetry. Fetch, swell and foam controls are inactive in this mode.
+retain wind and depth control. Each control key is a toggle: its upper-left
+indicator stays visible until that key is pressed again or another control is
+selected. **I** toggles a compact panel of all sea parameters in the same corner,
+highlighting the selected control. In the historical mode this includes gain
+and pinch; fetch, swell and foam controls are inactive.
 
 The baseline reconstructs the original course equations with the surviving
 early Tweak implementation conventions. It is not a claim that every surviving

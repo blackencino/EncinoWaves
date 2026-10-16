@@ -20,7 +20,7 @@ from wgpu.utils.imgui import ImguiRenderer
 
 from .camera import Camera, interpolate_camera
 from .school_fonts import nimbus_regular
-from .school_overlays import TITLE_DURATION, draw_title, draw_control, draw_example, draw_telemetry, draw_camera_telemetry, format_control_value
+from .school_overlays import TITLE_DURATION, draw_title, draw_control, draw_example, draw_telemetry, draw_camera_telemetry, format_control_value, info_bottom
 from .school_scenes import opening_scene, school_examples, SCHOOL_FOAM
 from .editing import make_wave_basis, same_wave_basis
 from .foam import Foam_parameters, prepare_foam
@@ -285,8 +285,11 @@ class SchoolViewer(Viewer):
     def _draw_comparison_labels(self, width, height, fixed):
         if not self.comparing:
             return
+        y = max(TITLE_SAFE_TOP + 16, info_bottom(
+            self.state.parameters, self._telemetry_opacity(self.performance_time),
+            self.performance_overlay) + 16)
         for x, label in ((96, "TESSENDORF BASELINE"), (WIDTH // 2 + 48, "ENCINO WAVES")):
-            imgui.set_next_window_pos((x, TITLE_SAFE_TOP + 16))
+            imgui.set_next_window_pos((x, y))
             imgui.set_next_window_bg_alpha(.65)
             imgui.begin(label, flags=fixed | imgui.WindowFlags_.always_auto_resize | imgui.WindowFlags_.no_inputs)
             self._label(label, 16, (.92, .94, .89, 1))
@@ -355,9 +358,10 @@ class SchoolViewer(Viewer):
 
     def draw_gui(self):
         if self.show_ui:
-            fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
+            fixed = (imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_resize |
+                     imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings)
             imgui.set_next_window_pos((WIDTH - 420, TITLE_SAFE_TOP))
-            imgui.set_next_window_size((372, 610))
+            imgui.set_next_window_size((372, TITLE_SAFE_BOTTOM - TITLE_SAFE_TOP))
             imgui.begin("school_setup", flags=fixed)
             self._label("School setup", 23, (.92, .94, .92, 1))
             imgui.text("1024 m patch | 2048 waves | 1024 foam")
@@ -370,7 +374,10 @@ class SchoolViewer(Viewer):
                 imgui.text(f"Manual Phillips gain: {self.parameters.phillips_amplitude:.3f}")
                 if imgui.button("Original SimOcean gain: 3.4375"):
                     self.performance.transition({"phillips_amplitude": 55/16}, self._wall_time(), duration=.2)
-            imgui.text_wrapped("T switches the wave model. W wind, D depth, G Phillips gain, P pinch; left/right arrows adjust. F fetch, S swell and M foam apply to Encino Waves. E next example, I sea info, C camera info.")
+            imgui.text_wrapped("W wind, D depth, G gain, P pinch; left/right arrows adjust. Press the same control key to close it, or another control key to switch. F fetch, S swell and M foam apply to Encino Waves. T model, E example, C camera info.")
+            changed, _ = imgui.checkbox("Show all sea info (I)", self.telemetry["visible"])
+            if changed:
+                self._toggle_telemetry(self._wall_time())
             imgui.text_wrapped("Maya camera controls are unchanged. Playback smooths between cameras after four seconds without an adjustment.")
             imgui.begin_disabled(self.rehearsal is not None or self.replay)
             if imgui.button("Reset opening ocean"):
@@ -390,7 +397,9 @@ class SchoolViewer(Viewer):
         if self.comparing:
             fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
             self._draw_comparison_labels(WIDTH, HEIGHT, fixed)
-        draw_telemetry(self.overlay_font, self.state.parameters, self._telemetry_opacity(self.performance_time))
+        telemetry_opacity = self._telemetry_opacity(self.performance_time)
+        draw_telemetry(self.overlay_font, self.state.parameters, telemetry_opacity,
+                       foam=self.look.foam, overlay=self.performance_overlay)
         if not self.replay:
             draw_camera_telemetry(self.overlay_font, self.camera,
                                   self._fade_opacity(self.camera_telemetry, time.perf_counter()))
@@ -398,7 +407,7 @@ class SchoolViewer(Viewer):
             overlay = dict(self.performance_overlay)
             if overlay.get("mode") == "examples":
                 draw_example(self.overlay_font, overlay.get("label", "Examples"), overlay.get("opacity", 0))
-            else:
+            elif telemetry_opacity <= 0:
                 mode, value = overlay.get("mode"), overlay.get("value")
                 if isinstance(value, (float, int)):
                     overlay["value_text"] = format_control_value(mode, value)
@@ -420,8 +429,8 @@ class SchoolViewer(Viewer):
             if imgui.button("Stop rehearsal (R)"):
                 self.stop_rehearsal()
         else:
-            hint = ("W wind  D depth  G gain  P pinch  E next  I sea  C camera" if self.tessendorf_only else
-                    "W wind  D depth  F fetch  S swell  M foam  E next  I sea  C camera")
+            hint = ("W wind  D depth  G gain  P pinch  E next  I info  C camera" if self.tessendorf_only else
+                    "W wind  D depth  F fetch  S swell  P pinch  M foam  E next  I info  C camera")
             self._label(hint, 15, (.91, .93, .92, 1))
             if imgui.button("Tessendorf baseline (T)" if self.tessendorf_only else "Encino Waves (T)"):
                 self.set_tessendorf_mode(not self.tessendorf_only)
@@ -482,10 +491,11 @@ class SchoolViewer(Viewer):
         # drawn only in the interactive viewer, including over the title card.
         draw = imgui.get_foreground_draw_list()
         color = imgui.get_color_u32(imgui.ImVec4(1, .35 if remaining < 15 else .85, .3 if remaining < 15 else .85, 1))
-        draw.add_rect_filled((32, 32), (575, 117), imgui.get_color_u32(imgui.ImVec4(0, 0, 0, .8)), 8)
-        draw.add_text(self.overlay_font, 30, (50, 45), color,
+        x = WIDTH - 575
+        draw.add_rect_filled((x, 32), (WIDTH - 32, 117), imgui.get_color_u32(imgui.ImVec4(0, 0, 0, .8)), 8)
+        draw.add_text(self.overlay_font, 30, (x + 18, 45), color,
                       f"REC  {self._clock_text(elapsed)}  /  04:58.0")
-        draw.add_text(self.overlay_font, 19, (50, 84), color,
+        draw.add_text(self.overlay_font, 19, (x + 18, 84), color,
                       f"{self._clock_text(remaining)} remaining     R to cut")
 
     def rehearsal_values(self):
