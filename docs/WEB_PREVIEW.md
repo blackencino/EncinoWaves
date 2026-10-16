@@ -98,7 +98,8 @@ It checks actual nonblank GPU output, console/network/GL errors, animation,
 pause, keyboard wind changes, Maya orbit, all four scenes, each quality,
 sliders, reset, and a 390 × 844 touch viewport. It also verifies the visible
 error when WebGL is unavailable. Reports and screenshots go in the ignored
-`renders/web-smoke/` directory. `BASE_URL=https://blackencino.github.io/EncinoWaves/`
+`renders/web-smoke/` directory (numerical reports use `renders/web-simulation/`).
+`BASE_URL=https://blackencino.github.io/EncinoWaves/`
 runs the UI smoke test against the deployed site; the numerical fixture is
 intentionally excluded from the published site.
 
