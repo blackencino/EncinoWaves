@@ -6,7 +6,7 @@ struct Uniforms {
     up_exposure: vec4f,
     ocean: vec4f,        // domain, resolution, crest threshold, foam amount
     environment: vec4f,  // sky rotation, haze, sky gain, ocean rotation
-    sun: vec4f,
+    sun: vec4f,          // dominant light direction, historical water flag
     sun_color: vec4f,
     grid: vec4f,         // x segments, y segments, near distance, far distance
     statistics: vec4f,   // big height, crest gain, crest bias, max crest
@@ -232,6 +232,16 @@ fn atmosphere(color: vec3f,world: vec3f,incident: vec3f) -> vec3f {
     normal=normalize(normal+view*1e-5);
     let nv=clamp(dot(normal,view),0.0,1.0);
     let reflection=reflect(-view,normal);
+    if u.sun.w>.5 {
+        // A simple presentation of the early wave model: reflected sky and a
+        // constant water tint, without foam or any underwater volume model.
+        // This keeps today's sky/display controls, rather than attempting a
+        // pixel-identical reproduction of the original fixed-function viewer.
+        let reflectance=fresnel_dielectric(nv);
+        let body=vec3f(.018,.035,.042)*sky_irradiance(vec3f(0.0,0.0,1.0));
+        let color=reflectance*environment(reflection,0.0)+(1.0-reflectance)*body;
+        return vec4f(atmosphere(color,in.world,-view),1.0);
+    }
     // Averaged normals encode unresolved variance. Carry it into reflection
     // filtering instead of renormalizing away the distant wave energy.
     let slope=sqrt(u.optics.x*u.optics.x+max(0.0,2.0*(1.0-normal_length)/normal_length));

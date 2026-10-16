@@ -18,6 +18,8 @@ def parser():
     school.add_argument("--sky",type=Path,help="Local HDR sky panorama")
     school.add_argument("--scene",type=Path,help="JSON saved by the viewer")
     school.add_argument("--preset",type=int,choices=range(1,7),default=3)
+    school.add_argument("--tessendorf",action="store_true",help="Start with the early Phillips/Tweak baseline")
+    view.add_argument("--tessendorf",action="store_true",help="Start with the early Phillips/Tweak baseline")
     school_render=sub.add_parser("school-render",help="Render a School rehearsal as 1080p24 H.264 MOV")
     school_render.add_argument("rehearsal",type=Path)
     school_render.add_argument("output",type=Path)
@@ -96,10 +98,14 @@ def main(argv=None):
         return
     if args.command=="view":
         from .viewer import Viewer
-        Viewer(args.resolution,args.device,args.sky,args.preset-1,scene=args.scene).run(); return
+        viewer=Viewer(args.resolution,args.device,args.sky,args.preset-1,scene=args.scene)
+        if args.tessendorf: viewer.set_tessendorf_mode(True)
+        viewer.run(); return
     if args.command=="school-view":
         from .school_viewer import SchoolViewer
-        SchoolViewer(device=args.device,sky=args.sky,preset=args.preset-1,scene=args.scene).run(); return
+        viewer=SchoolViewer(device=args.device,sky=args.sky,preset=args.preset-1,scene=args.scene)
+        if args.tessendorf: viewer.set_tessendorf_mode(True)
+        viewer.run(); return
     if args.command=="school-render":
         from .school_export import render_rehearsal
         render_rehearsal(args.rehearsal,args.output,device=args.device,overwrite=args.overwrite); return

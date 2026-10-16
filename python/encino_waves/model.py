@@ -32,6 +32,8 @@ class Wave_parameters:
     density: float = 1000.0
     pinch: float = 0.75
     amplitude_gain: float = 1.0
+    phillips_amplitude: float = 100.0  # manual height gain; early toy viewer used 55/16
+    phillips_pinch: float = 75.0       # independent horizontal gain; early value was 60/16
     seed: int = 54321
     gamma: float = 3.3
     convention: str = "paper"
@@ -69,7 +71,8 @@ class Wave_parameters:
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-        for name in ("swell", "wind_direction", "surface_tension", "pinch", "amplitude_gain"):
+        for name in ("swell", "wind_direction", "surface_tension", "pinch", "amplitude_gain",
+                     "phillips_amplitude", "phillips_pinch"):
             if not math.isfinite(getattr(self, name)):
                 raise ValueError(f"{name} must be finite")
         if not -1 <= self.swell <= 2:
@@ -78,11 +81,11 @@ class Wave_parameters:
             raise ValueError("trough_damping must be in [0, 1]")
         if self.trough_filter_revision != 3:
             raise ValueError("trough_filter_revision must be 3; import older settings with from_dict")
-        if self.surface_tension < 0 or self.amplitude_gain < 0:
-            raise ValueError("surface_tension and amplitude_gain cannot be negative")
+        if self.surface_tension < 0 or self.amplitude_gain < 0 or self.phillips_amplitude < 0:
+            raise ValueError("surface_tension and amplitude gains cannot be negative")
         if self.spreading not in ("cosine_squared", "mitsuyasu", "hasselmann", "donelan_banner"):
             raise ValueError("unknown directional spreading model")
-        if self.spectrum not in ("pm", "jonswap", "tma"):
+        if self.spectrum not in ("pm", "jonswap", "tma", "phillips"):
             raise ValueError("unknown spectrum")
         if self.dispersion not in ("deep", "finite", "capillary"):
             raise ValueError("unknown dispersion")
@@ -92,9 +95,11 @@ class Wave_parameters:
             raise ValueError("seed must be an unsigned 32-bit integer")
 
     def tessendorf(self):
-        # The requested comparison: PM + positive cosine squared, no swell.
-        # Keep dispersion, seed, gain, camera and shading matched.
-        return replace(self, spectrum="pm", spreading="cosine_squared", swell=0.0)
+        # Early course/SimOcean baseline: Phillips with two-sided cos², complex
+        # Gaussian h0, finite-depth speed, and no depth-dependent energy damping.
+        # The later production balance/perpendicular controls are omitted.
+        return replace(self, spectrum="phillips", spreading="cosine_squared",
+                       dispersion="finite", swell=0.0, trough_damping=0.0)
 
     def in_ocean_space(self):
         """The original +X simulation, before placing its mesh in the world."""
@@ -149,6 +154,8 @@ def dispersion_at(p, k):
 
 
 def spectrum_at(p, omega):
+    if p.spectrum == "phillips":
+        raise ValueError("Phillips is a wavenumber spectrum; use phillips_spectrum_at")
     w = np.maximum(np.asarray(omega, dtype=np.float64), 1e-12)
     if p.spectrum == "pm":
         wm = 0.87 * p.gravity / p.wind_speed
@@ -166,7 +173,25 @@ def spectrum_at(p, omega):
     return np.where(np.asarray(omega) > 0, result, 0.0)
 
 
+def phillips_spectrum_at(p, k, theta):
+    """Early Phillips P(k), before its arbitrary artist gain and FFT scaling.
+
+    The surviving early Tweak implementation has no short-wave exponential,
+    frequency-dependent directionality, or depth factor. Its unmodified cos²
+    baseline has equal energy along and against the wind.
+    """
+    k = np.asarray(k, dtype=np.float64)
+    safe_k = np.maximum(k, 1e-12)
+    length = p.wind_speed**2/p.gravity
+    radial = np.exp(-1/(safe_k*length)**2)/safe_k**4
+    return np.where(k > 0, radial*np.cos(theta)**2, 0.0)
+
+
 def spreading_at(p, omega, theta):
+    if p.spectrum == "phillips":
+        # This historical factor is deliberately not an angular probability
+        # density: its arbitrary scale belongs to the manual Phillips gain.
+        return np.cos(np.asarray(theta, dtype=np.float64))**2
     w = np.maximum(np.asarray(omega, dtype=np.float64), 1e-12)
     theta = np.asarray(theta, dtype=np.float64)
     ratio = w / peak_omega(p, directional=True)
@@ -250,6 +275,56 @@ def random_variates(kx, ky, seed):
     return radius*np.cos(2*np.pi*values[1]), radius*np.sin(2*np.pi*values[1]), 2*np.pi*values[2], 2*np.pi*values[3]
 
 
+def legacy_gaussian_variates(count, seed):
+    """Rand48/Marsaglia polar draws, including the original float rounding.
+
+    Affine LCG jumps vectorize consecutive draws without replacing the stream.
+    Each accepted pair returns y first, then the cached x, as in the early code.
+    """
+    mask = (1 << 48)-1
+    multiplier, increment = 0x5DEECE66D, 0xB
+    batch = 8192  # even: each candidate consumes consecutive x/y uniforms
+    powers, offsets = np.empty(batch, np.uint64), np.empty(batch, np.uint64)
+    a, c = 1, 0
+    for index in range(batch):
+        a, c = (a*multiplier) & mask, (c*multiplier+increment) & mask
+        powers[index], offsets[index] = a, c
+    state = np.uint64((seed << 16) | 0x330e)
+    result, written = np.empty(count, np.float32), 0
+    while written < count:
+        states = (powers*state+offsets) & np.uint64(mask)
+        state = states[-1]
+        uniforms = (states.astype(np.float64)/(1 << 48)).astype(np.float32)
+        xy = (2*uniforms-1).reshape(-1, 2)
+        squared = xy[:, 0]*xy[:, 0]+xy[:, 1]*xy[:, 1]
+        accepted = (squared > 0) & (squared <= 1)
+        xy, squared = xy[accepted], squared[accepted]
+        # The archived implementation used logf/sqrtf and float arithmetic.
+        factor = np.sqrt(-2*np.log(squared)/squared)
+        pairs = (xy[:, ::-1]*factor[:, None]).reshape(-1)
+        take = min(len(pairs), count-written)
+        result[written:written+take] = pairs[:take]
+        written += take
+    return result
+
+
+def legacy_random_coefficients(resolution, seed):
+    """The early row-major half-plane h0 stream, in our phase convention.
+
+    Four successive real Gaussian draws form two independent complex values.
+    They represent h0(k) and h0(-k), not signed amplitude plus uniform phase.
+    Changing resolution therefore changes this historical realization.
+    """
+    shape = (resolution, resolution//2+1)
+    normals = np.zeros((math.prod(shape), 4), np.float32)
+    normals[1:] = legacy_gaussian_variates(4*(len(normals)-1), seed).reshape(-1, 4)
+    h0 = (normals[:, 0]+1j*normals[:, 1]).reshape(shape)
+    h0_negative = (normals[:, 2]+1j*normals[:, 3]).reshape(shape)
+    # Our evolution is positive*exp(-iwt)+negative*exp(iwt); the course uses
+    # h0(k)*exp(iwt)+conj(h0(-k))*exp(-iwt).
+    return h0_negative.conj(), h0
+
+
 @dataclass(frozen=True)
 class Phase_step:
     """An outgoing dispersion segment, ending at an absolute animation time."""
@@ -317,6 +392,7 @@ def make_initial_state(parameters=Wave_parameters(), device="auto"):
     j = np.arange(n)
     # Matches the C++ iterator, including its positive Nyquist row.
     ky_all = np.where(j <= n//2, j, j-n)*dk
+    legacy_noise = legacy_random_coefficients(n, p.seed) if p.spectrum == "phillips" else None
     for row in range(0, n, 64):
         section = slice(row, min(row+64, n))
         ky = ky_all[section, None]
@@ -328,11 +404,16 @@ def make_initial_state(parameters=Wave_parameters(), device="auto"):
         theta = np.arctan2(-ky, kx)
         theta = (theta+math.pi) % (2*math.pi)-math.pi
         opposite = (theta+2*math.pi) % (2*math.pi)-math.pi
-        energy = spectrum_at(p, omega)*dk*dk*derivative/safe_k
-        amp_pos, amp_neg, phase_pos, phase_neg = random_variates(kx, ky, p.seed)
-        direction_pos, direction_neg = spreading_at(p, omega, np.stack((theta, opposite)))
-        pos[section] = amp_pos*np.sqrt(2*energy*direction_pos)*np.exp(-1j*phase_pos)
-        neg[section] = amp_neg*np.sqrt(2*energy*direction_neg)*np.exp(-1j*phase_neg)
+        if legacy_noise is not None:
+            magnitude = np.sqrt(.5*phillips_spectrum_at(p, k, theta))/p.domain**2
+            pos[section] = legacy_noise[0][section]*magnitude
+            neg[section] = legacy_noise[1][section]*magnitude
+        else:
+            energy = spectrum_at(p, omega)*dk*dk*derivative/safe_k
+            amp_pos, amp_neg, phase_pos, phase_neg = random_variates(kx, ky, p.seed)
+            direction_pos, direction_neg = spreading_at(p, omega, np.stack((theta, opposite)))
+            pos[section] = amp_pos*np.sqrt(2*energy*direction_pos)*np.exp(-1j*phase_pos)
+            neg[section] = amp_neg*np.sqrt(2*energy*direction_neg)*np.exp(-1j*phase_neg)
         omega_out[section] = omega
         multipliers[0, section] = 1
         multipliers[1, section] = -1j*kx/safe_k
@@ -370,9 +451,13 @@ def evaluate(state, time):
     # FFTW/cufft C2R are unnormalized. norm='forward' is essential: the
     # default inverse scaling would make the sea shrink with resolution.
     fields = torch.fft.irfft2(state.multipliers*h[None], s=(p.resolution, p.resolution), norm="forward")
-    crest = crest_from_derivatives(*fields[3:].unbind(), p.pinch)
-    height, dx, dy = damp_troughs(p, fields).unbind()
-    displacement = torch.stack((-p.pinch*dx, -p.pinch*dy, p.amplitude_gain*height, crest), dim=-1)
+    # The early viewer had independent AMP and PINCH after the inverse FFT.
+    # Raising height never increases horizontal compression in this mode.
+    pinch = p.phillips_pinch if p.spectrum == "phillips" else p.pinch
+    height_gain = p.amplitude_gain*(p.phillips_amplitude if p.spectrum == "phillips" else 1)
+    crest = crest_from_derivatives(*fields[3:].unbind(), pinch)
+    height, dx, dy = (fields[:3] if p.spectrum == "phillips" else damp_troughs(p, fields)).unbind()
+    displacement = torch.stack((-pinch*dx, -pinch*dy, height_gain*height, crest), dim=-1)
     # ComputeNormalsWithPinching from Normals.h: central differences of
     # actual displaced points, with periodic neighbors and unwrapped spacing.
     points=displacement[...,:3]

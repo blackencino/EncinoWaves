@@ -32,6 +32,10 @@ def format_control_value(mode, value):
         return f"{value:.2f}"
     if mode in ("foam", "foam_amount", "m"):
         return f"{value * 100.0:.0f}%"
+    if mode in ("gain", "phillips_amplitude", "g"):
+        return f"{value:.3f}"
+    if mode in ("pinch", "historical_pinch", "phillips_pinch", "p"):
+        return f"{value:.2f}"
     return f"{value:g}"
 
 
@@ -167,6 +171,11 @@ def draw_telemetry(font, parameters, opacity):
         ("Fetch", format_control_value("fetch", parameters.fetch_km)),
         ("Swell", format_control_value("swell", parameters.swell)),
     )
+    if parameters.spectrum == "phillips":
+        rows = rows[:2] + (
+            ("Phillips Gain", format_control_value("gain", parameters.phillips_amplitude)),
+            ("Pinch", format_control_value("pinch", parameters.phillips_pinch)),
+        )
     for row, (label, value) in enumerate(rows):
         y = 240.0 + row * 80.0
         _text(font, 52.0, label, 96.0, y, opacity * 0.90)

@@ -18,9 +18,13 @@ CONTROLS = {
     "fetch": ("fetch_km", "Fetch", 1.0, 5000.0, True, .17),
     "swell": ("swell", "Swell", -1.0, 2.0, False, .22),
     "foam": ("foam_amount", "Foam", 0.0, 2.0, False, .15),
+    "gain": ("phillips_amplitude", "Phillips Gain", .01, 10000.0, True, .12),
+    "pinch": ("pinch", "Pinch", -3.0, 3.0, False, .12),
+    "historical_pinch": ("phillips_pinch", "Pinch", -300.0, 300.0, False, .12),
 }
 _MODES = {"w": "wind", "wind_speed": "wind", "d": "depth", "f": "fetch",
-          "fetch_km": "fetch", "s": "swell", "m": "foam", "foam_amount": "foam", "e": "examples"}
+          "fetch_km": "fetch", "s": "swell", "m": "foam", "foam_amount": "foam", "e": "examples",
+          "g": "gain", "phillips_amplitude": "gain", "p": "pinch", "phillips_pinch": "historical_pinch"}
 _FIELDS = {control[0]: control for control in CONTROLS.values()}
 ACCELERATION_SECONDS = .30
 FRICTION_SECONDS = .45
@@ -179,6 +183,12 @@ def _apply(state, event):
     elif kind == "direction":
         state["held"][event["direction"]] = event["down"]
         if event["down"] and state["mode"] in CONTROLS: state["transition"] = None
+    elif kind == "stop":
+        state["exit_opacity"] = _overlay(state, time)["opacity"]
+        state["mode"], state["exit_time"] = None, time
+        state["velocities"] = {name: 0.0 for name in state["positions"]}
+        state["held"] = {"left": False, "right": False}
+        state["transition"] = None
     elif kind == "transition":
         state["transition"] = {"start": time, "duration": event["duration"],
                                "from": deepcopy(state["parameters"]), "target": deepcopy(event["target"])}
@@ -230,7 +240,7 @@ class Performance:
             timestamp = _number(event["time"], "Event time")
             if timestamp < 0 or timestamp < previous: raise ValueError("Performance events must be ordered")
             previous = timestamp
-            if event["kind"] not in ("mode", "direction", "transition"):
+            if event["kind"] not in ("mode", "direction", "transition", "stop"):
                 raise ValueError("Unknown performance event")
         result.events = deepcopy(data.get("events", []))
         result.camera_moves = deepcopy(data.get("camera_moves", []))
@@ -274,6 +284,10 @@ class Performance:
         down = bool(down)
         if self._state_at(time)["held"][direction] == down: return None
         return self._event("direction", time, direction=direction, down=down)
+
+    def stop_controls(self, time):
+        """Stop inertia and held arrows when changing the displayed wave model."""
+        return self._event("stop", time)
 
     def transition(self, target_parameters, time, duration=2.5, name=None):
         duration = _number(duration, "Transition duration")

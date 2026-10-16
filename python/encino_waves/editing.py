@@ -11,7 +11,7 @@ import math
 import numpy as np
 import torch
 from .model import (Wave_parameters, Initial_state, Phase_step, select_device,
-                    random_variates, peak_omega, phase_at)
+                    random_variates, legacy_random_coefficients, peak_omega, phase_at)
 
 
 def same_wave_basis(a, b):
@@ -26,6 +26,8 @@ class Wave_basis:
     angle: torch.Tensor
     noise_positive: torch.Tensor
     noise_negative: torch.Tensor
+    legacy_noise_positive: torch.Tensor
+    legacy_noise_negative: torch.Tensor
     multipliers: torch.Tensor
     quadrature: torch.Tensor  # positive half of the 64-point Gauss rule
 
@@ -50,6 +52,7 @@ def make_wave_basis(parameters=Wave_parameters(), device="auto"):
     amp_pos, amp_neg, phase_pos, phase_neg = random_variates(kx, ky, p.seed)
     positive = amp_pos*np.exp(-1j*phase_pos)
     negative = amp_neg*np.exp(-1j*phase_neg)
+    legacy_positive, legacy_negative = legacy_random_coefficients(n, p.seed)
     positive[0, 0] = negative[0, 0] = 0
     multipliers = np.empty((6, n, width), np.complex64)
     multipliers[0] = 1
@@ -66,6 +69,7 @@ def make_wave_basis(parameters=Wave_parameters(), device="auto"):
         tensor(index.reshape(n, width), np.int64),
         tensor(np.arctan2(-ky, kx), np.float32),
         tensor(positive, np.complex64), tensor(negative, np.complex64),
+        tensor(legacy_positive, np.complex64), tensor(legacy_negative, np.complex64),
         tensor(multipliers, np.complex64),
         tensor(np.stack((angles[32:], weights[32:]*2)), np.float32))
 
@@ -147,6 +151,17 @@ def state_from_basis(basis, parameters):
         raise ValueError("domain, resolution, or seed changed; create a new wave basis")
     k, index = basis.radial_k, basis.radial_index
     omega, derivative = _dispersion(p, k)
+    if p.spectrum == "phillips":
+        safe_k = k.clamp_min(1e-12)
+        length = p.wind_speed**2/p.gravity
+        # Log evaluation avoids inf*0 at DC on float32 devices. No omega->k
+        # Jacobian, TMA depth factor, directional normalization, or bin area.
+        radial = torch.exp(-1/(safe_k*length)**2-4*torch.log(safe_k))
+        magnitude = torch.sqrt(.5*radial[index])*torch.abs(torch.cos(basis.angle))/p.domain**2
+        # Wind is exactly +X; the perpendicular column has exactly zero energy.
+        magnitude[:, 0] = 0
+        return Initial_state(p, basis.legacy_noise_positive*magnitude,
+                             basis.legacy_noise_negative*magnitude, omega[index], basis.multipliers)
     energy = _spectrum(p, omega)*(2*math.pi/p.domain)**2*derivative/k.clamp_min(1e-12)
     ratio = omega.clamp_min(1e-12)/peak_omega(p, directional=True)
     coefficient = 16 if p.convention == "paper" else 16.1
@@ -193,7 +208,7 @@ def _same_dispersion(a, b):
 def edit_state(basis, previous, parameters, time):
     """Retain the wave tensors for mesh rotation; retune other edits in phase."""
     spatial = ("wind_direction", "pinch", "amplitude_gain", "trough_damping",
-               "trough_smoothing_length", "trough_filter_revision")
+               "trough_smoothing_length", "trough_filter_revision", "phillips_amplitude", "phillips_pinch")
     if replace(previous.parameters, **{name:getattr(parameters, name) for name in spatial}) == parameters:
         return replace(previous, parameters=parameters)
     return preserve_phase(previous, state_from_basis(basis, parameters), time)
@@ -252,9 +267,9 @@ def follow_parameters(current, target, elapsed, response=.10):
     amount = -math.expm1(-elapsed/response)
     values = {}
     for name in ("wind_speed", "fetch_km", "depth", "swell", "wind_direction", "pinch", "amplitude_gain",
-                 "trough_damping", "trough_smoothing_length"):
+                 "phillips_amplitude", "phillips_pinch", "trough_damping", "trough_smoothing_length"):
         a, b = getattr(current, name), getattr(target, name)
-        if name in ("wind_speed", "fetch_km", "depth"):
+        if name in ("wind_speed", "fetch_km", "depth") or (name == "phillips_amplitude" and a > 0 and b > 0):
             distance = math.log(b/a)
             value = a*math.exp(amount*distance)
         else:
@@ -262,4 +277,6 @@ def follow_parameters(current, target, elapsed, response=.10):
             if name == "wind_direction": distance = (distance+180)%360-180
             value = a+amount*distance
         values[name] = b if abs(distance) < 1e-4 else value
+    if target.spectrum == "phillips":
+        values.update(swell=0.0, trough_damping=0.0)
     return replace(target, **values)

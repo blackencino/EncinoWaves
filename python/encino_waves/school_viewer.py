@@ -267,6 +267,13 @@ class SchoolViewer(Viewer):
             self.reset_foam_serial += 1
         super().reset_foam()
 
+    def set_tessendorf_mode(self, enabled):
+        super().set_tessendorf_mode(enabled)
+        if self.performance is not None:
+            self.performance.stop_controls(self._wall_time())
+        self._held_keys.discard("arrowleft")
+        self._held_keys.discard("arrowright")
+
     def _control_panel_rect(self, width, height):
         # Presentation layout reserves 200px top/bottom at HD.
         return WIDTH - 370 - 48, TITLE_SAFE_TOP, 370, TITLE_SAFE_BOTTOM - TITLE_SAFE_TOP
@@ -278,7 +285,7 @@ class SchoolViewer(Viewer):
     def _draw_comparison_labels(self, width, height, fixed):
         if not self.comparing:
             return
-        for x, label in ((96, "EARLIER MODEL"), (WIDTH // 2 + 48, "ENCINO WAVES")):
+        for x, label in ((96, "TESSENDORF BASELINE"), (WIDTH // 2 + 48, "ENCINO WAVES")):
             imgui.set_next_window_pos((x, TITLE_SAFE_TOP + 16))
             imgui.set_next_window_bg_alpha(.65)
             imgui.begin(label, flags=fixed | imgui.WindowFlags_.always_auto_resize | imgui.WindowFlags_.no_inputs)
@@ -350,12 +357,20 @@ class SchoolViewer(Viewer):
         if self.show_ui:
             fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
             imgui.set_next_window_pos((WIDTH - 420, TITLE_SAFE_TOP))
-            imgui.set_next_window_size((372, 460))
+            imgui.set_next_window_size((372, 610))
             imgui.begin("school_setup", flags=fixed)
             self._label("School setup", 23, (.92, .94, .92, 1))
             imgui.text("1024 m patch | 2048 waves | 1024 foam")
             imgui.text("Output: 1080p24 | 4096 waves")
-            imgui.text_wrapped("W wind speed, D depth, F fetch, S swell, M foam. Left/right arrows drive the selected control. E advances to the next example. I toggles telemetry. C toggles camera info (preview only).")
+            changed, value = imgui.checkbox("Tessendorf baseline (T)", self.tessendorf_only)
+            if changed:
+                self.set_tessendorf_mode(value)
+            if self.tessendorf_only:
+                imgui.text_wrapped("Phillips spectrum, cosine squared spreading. Depth changes speed only. Simple reflections, no foam.")
+                imgui.text(f"Manual Phillips gain: {self.parameters.phillips_amplitude:.3f}")
+                if imgui.button("Original SimOcean gain: 3.4375"):
+                    self.performance.transition({"phillips_amplitude": 55/16}, self._wall_time(), duration=.2)
+            imgui.text_wrapped("T switches the wave model. W wind, D depth, G Phillips gain, P pinch; left/right arrows adjust. F fetch, S swell and M foam apply to Encino Waves. E next example, I sea info, C camera info.")
             imgui.text_wrapped("Maya camera controls are unchanged. Playback smooths between cameras after four seconds without an adjustment.")
             imgui.begin_disabled(self.rehearsal is not None or self.replay)
             if imgui.button("Reset opening ocean"):
@@ -397,7 +412,7 @@ class SchoolViewer(Viewer):
         # Session controls are present while rehearsing and omitted in the movie.
         fixed = imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_saved_settings
         imgui.set_next_window_pos((48, TITLE_SAFE_BOTTOM - 128))
-        imgui.set_next_window_size((540, 128))
+        imgui.set_next_window_size((620, 128))
         imgui.begin("school_session", flags=fixed)
         if self.rehearsal is not None:
             elapsed = min(298.0, time.perf_counter() - self.rehearsal_started)
@@ -405,7 +420,11 @@ class SchoolViewer(Viewer):
             if imgui.button("Stop rehearsal (R)"):
                 self.stop_rehearsal()
         else:
-            self._label("W wind  D depth  F fetch  S swell  M foam  E next  I sea  C camera", 15, (.91, .93, .92, 1))
+            hint = ("W wind  D depth  G gain  P pinch  E next  I sea  C camera" if self.tessendorf_only else
+                    "W wind  D depth  F fetch  S swell  M foam  E next  I sea  C camera")
+            self._label(hint, 15, (.91, .93, .92, 1))
+            if imgui.button("Tessendorf baseline (T)" if self.tessendorf_only else "Encino Waves (T)"):
+                self.set_tessendorf_mode(not self.tessendorf_only)
             imgui.begin_disabled(self.changed or self.future is not None or self.movie_process is not None)
             if imgui.button("Record rehearsal (R)"):
                 self.start_rehearsal()
@@ -612,9 +631,14 @@ class SchoolViewer(Viewer):
             return
         self._held_keys.add(key)
         now = self._wall_time()
-        modes = {"w": "wind_speed", "d": "depth", "f": "fetch_km", "s": "swell", "m": "foam"}
+        modes = {"w": "wind_speed", "d": "depth", "f": "fetch_km", "s": "swell", "m": "foam",
+                 "g": "phillips_amplitude", "p": "phillips_pinch" if self.tessendorf_only else "pinch"}
+        if (self.tessendorf_only and key in ("f", "s", "m")) or (not self.tessendorf_only and key == "g"):
+            return
         if key in modes:
             self.performance.mode_key(modes[key], now)
+        elif key == "t":
+            self.set_tessendorf_mode(not self.tessendorf_only)
         elif key in ("arrowleft", "arrowright"):
             self.performance.direction_key("left" if key == "arrowleft" else "right", True, now)
         elif key == "e":
@@ -652,7 +676,10 @@ class SchoolViewer(Viewer):
         examples = school_examples(self.parameters.resolution)
         scene = examples[self._next_example_index]
         self._next_example_index = (self._next_example_index + 1) % len(examples)
-        self.performance.transition(asdict(scene.parameters), now, duration=3.0, name=scene.name)
+        target = asdict(scene.parameters)
+        target["phillips_amplitude"] = self.parameters.phillips_amplitude
+        target["phillips_pinch"] = self.parameters.phillips_pinch
+        self.performance.transition(target, now, duration=3.0, name=scene.name)
         self.performance.add_camera_move(now, now + 4.0, self.camera, scene.camera)
         self._example_camera_move = (now, now + 4.0, self.camera, scene.camera)
 

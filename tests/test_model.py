@@ -5,7 +5,7 @@ import pytest
 import torch
 from scipy.integrate import quad
 from encino_waves.model import (Wave_parameters, make_initial_state, evaluate,
-    dispersion_at, spectrum_at, spreading_at, peak_omega)
+    dispersion_at, spectrum_at, phillips_spectrum_at, spreading_at, peak_omega)
 
 
 @pytest.mark.parametrize("spreading",["hasselmann","mitsuyasu","donelan_banner","cosine_squared"])
@@ -35,7 +35,8 @@ def test_physical_limits_and_comparison():
     assert np.all(spectrum_at(replace(p,depth=2),omega)<=spectrum_at(p,omega))
     a=p.tessendorf()
     b=replace(p,fetch_km=1000,swell=1).tessendorf()
-    np.testing.assert_array_equal(spectrum_at(a,omega),spectrum_at(b,omega))
+    k=np.geomspace(.001,100,200)
+    np.testing.assert_array_equal(phillips_spectrum_at(a,k,0),phillips_spectrum_at(b,k,0))
     theta=np.linspace(-math.pi,math.pi,100)
     np.testing.assert_allclose(spreading_at(a,omega[0],theta),spreading_at(a,omega[-1],theta))
 

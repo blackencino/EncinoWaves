@@ -157,7 +157,7 @@ def test_draw_uses_fixed_simulation_steps_and_respects_pause(replay, monkeypatch
                                       upload_foam=lambda value: None, draw=lambda *args: None)
     replay.gui = SimpleNamespace(render=lambda: None)
     replay.future = None
-    replay.state = object()
+    replay.state = SimpleNamespace(parameters=replay.parameters)
     replay.rendered_state = None
     replay.saved_shading = None
     replay.save_requested = False

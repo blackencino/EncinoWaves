@@ -1,6 +1,6 @@
 # Copyright 2026 Christopher Jon Horvath. Apache-2.0.
 """Native Metal / Vulkan / D3D12 ocean renderer, also usable without a window."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import math
 import os
@@ -381,6 +381,11 @@ class Ocean_renderer:
                     {"binding":2,"resource":{"buffer":self.uniform}}])
 
     def draw(self,target_view,width,height,camera=Camera(),look=Look(),viewport=None,clear=True):
+        if self.frame is not None and self.frame.parameters.spectrum == "phillips":
+            # The historical comparison uses simple reflective water, while
+            # retaining the same sky, camera and display transform. Derive a
+            # temporary look so returning to modern waves restores every choice.
+            look = replace(look,material="physical",foam=0.,aeration=0.,crest_crumble=False)
         if not self._physical_ready and look.material == "physical":
             # On Metal the first filtered physical draw can differ from later
             # draws with bit-identical inputs. Complete one priming draw before
@@ -396,6 +401,7 @@ class Ocean_renderer:
             raise RuntimeError("Upload a wave frame before drawing")
         sky_pipeline,ocean_pipeline = self._select_material(look.material)
         physical = look.material == "physical"
+        historical = self.frame.parameters.spectrum == "phillips"
         # Each side of a comparison resolves its own linear HDR image. The final
         # display pass composites only that viewport, preserving the other side.
         render_width,render_height = tuple(map(int,viewport[2:])) if physical and viewport else (width,height)
@@ -411,7 +417,7 @@ class Ocean_renderer:
         # so even a very bright HDR sun remains recoverable at low exposure.
         hdr_scale = max(1.0,self.sky_peak*look.sky_gain/32000) if physical else 1.0
         lighting_gain = look.sky_gain/hdr_scale
-        foam_parameters = self.foam_state.parameters if self.foam_state is not None else None
+        foam_parameters = self.foam_state.parameters if self.foam_state is not None and not historical else None
         crest_crumble = bool(look.crest_crumble and look.crest_crumble_strength > 0 and foam_parameters is not None
                              and foam_parameters.emission_model == "compression")
         uniform = np.array([
@@ -419,12 +425,12 @@ class Ocean_renderer:
             [*forward,math.tan(math.radians(camera.fov)/2)],
             [*right,aspect],[*up,look.exposure+math.log2(hdr_scale)],
             [self.frame.parameters.domain,self.wave_size,look.crest_threshold,look.foam],
-            [rotation,look.haze,lighting_gain*self.sky_storage_scale,ocean_rotation],[*sun,0],
+            [rotation,look.haze,lighting_gain*self.sky_storage_scale,ocean_rotation],[*sun,float(historical)],
             [*((self.sun_color if look.material=="2015" else self.lighting.direct_irradiance)*lighting_gain),0],
             [*self.mesh_resolution,.5,30000],
             [self.big_height,self.crest_gain,self.crest_bias,look.crest_maximum],
             [*(self.moon_color*look.sky_gain),0],
-            [float(self.foam_state is not None),look.aeration,look.crest_crumble_strength if crest_crumble else 0.0,
+            [float(foam_parameters is not None),look.aeration,look.crest_crumble_strength if crest_crumble else 0.0,
              foam_parameters.compression_threshold if foam_parameters else .75],
             [.025,float(self.reflection_texture.mip_level_count-1),20000,
              foam_parameters.compression_width if foam_parameters else .15],
@@ -437,12 +443,12 @@ class Ocean_renderer:
             for groups in self.wave_mips:
                 self._mipmaps(encoder,groups)
             self.mips_dirty = False
-        if self.foam_dirty:
+        if self.foam_dirty and not historical:
             self._mipmaps(encoder,self.foam_mips)
         crest_threshold = foam_parameters.compression_threshold if foam_parameters else .75
         crest_width = foam_parameters.compression_width if foam_parameters else .15
         material_settings = (look.foam,crest_crumble,crest_threshold,crest_width)
-        if physical and (self.foam_material_dirty or self.foam_material_settings != material_settings
+        if physical and not historical and (self.foam_material_dirty or self.foam_material_settings != material_settings
                          or (crest_crumble and self.foam_material_crest_dirty)):
             material_texture = self.foam_material.update(encoder,self.foam_texture,look.foam,
                 crest_texture=self.wave_textures[0] if crest_crumble else None,
@@ -453,7 +459,7 @@ class Ocean_renderer:
             self.foam_material_settings = material_settings
             self.foam_material_crest_dirty = False
             self.foam_material_dirty = False
-        if self.foam_dirty:
+        if self.foam_dirty and not historical:
             self.foam_dirty = False
         attachment = {"view":target_view,"clear_value":(0,0,0,1),
                       "load_op":"clear" if clear else "load","store_op":"store"}

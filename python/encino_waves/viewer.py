@@ -140,6 +140,14 @@ class Viewer:
         self.foam_state=None
         self.comparison_foam_state=None
 
+    def set_tessendorf_mode(self, enabled):
+        """Switch the displayed model without replacing the modern settings."""
+        self.tessendorf_only=bool(enabled)
+        self.comparing=False
+        self.comparison_state=None
+        self.reset_foam()
+        self.changed=True
+
     def _start_update(self):
         # Only lattice / random-basis edits need a CPU build. Physical controls
         # feed the post-seed GPU stage on every displayed frame, without debounce.
@@ -166,10 +174,8 @@ class Viewer:
                 self.comparison_state=state_from_basis(self.basis,parameters)
             elif self.comparison_state.parameters!=parameters:
                 self.comparison_state=edit_state(self.basis,self.comparison_state,parameters,self.time)
-            # Both panels use exactly the same travelling-wave phase history.
-            if self.comparison_state.phase is not self.state.phase:
-                self.comparison_state=replace(self.comparison_state,phase=self.state.phase,
-                                              phase_steps=self.state.phase_steps)
+            # The baseline has finite-depth gravity dispersion. Keep its own
+            # integrated phase rather than borrowing the modern capillary phase.
         else:
             self.comparison_state=None
         self.changed=self.state.parameters!=desired
@@ -221,7 +227,10 @@ class Viewer:
             self.renderer.restore_shading_statistics(self.saved_shading)
             self.saved_shading=None
         shading=self.renderer.shading_statistics
-        self.foam_state=update_foam(self.foam_state,self.renderer.frame,self.foam_parameters,shading.crest_gain,shading.crest_bias)
+        if self.state.parameters.spectrum == "phillips":
+            self.foam_state=None
+        else:
+            self.foam_state=update_foam(self.foam_state,self.renderer.frame,self.foam_parameters,shading.crest_gain,shading.crest_bias)
         self.renderer.upload_foam(self.foam_state)
         view=target.create_view()
         if self.comparing and self.comparison_state is not None:
@@ -233,7 +242,7 @@ class Viewer:
                 self.comparison_renderer.restore_shading_statistics(self.saved_comparison_shading)
                 self.saved_comparison_shading=None
             shading=self.comparison_renderer.shading_statistics
-            self.comparison_foam_state=update_foam(self.comparison_foam_state,self.comparison_renderer.frame,self.foam_parameters,shading.crest_gain,shading.crest_bias)
+            self.comparison_foam_state=None
             self.comparison_renderer.upload_foam(self.comparison_foam_state)
             half=width//2
             self.comparison_renderer.draw(view,width,height,self.camera,self.look,viewport=(0,0,half,height))
@@ -269,6 +278,8 @@ class Viewer:
                   "time":self.time,"sky":str(Path(sky).resolve()) if Path(sky).is_file() else None,
                   "post_seed":self.post_seed,
                   "phase_steps":[asdict(step) for step in self.state.phase_steps],
+                  "comparison_phase_steps":[asdict(step) for step in self.comparison_state.phase_steps]
+                      if self.comparing and self.comparison_state is not None else [],
                   "comparison":self.comparing,"shading_statistics":asdict(self.renderer.shading_statistics),
                   "comparison_shading_statistics":asdict(self.comparison_renderer.shading_statistics)
                       if self.comparing and self.comparison_renderer is not None else None}
@@ -307,7 +318,8 @@ class Viewer:
         if self.comparing:
             p=parameters.tessendorf()
             other=state_from_basis(self.basis,p)
-            self.comparison_state=replace(other,phase=self.state.phase,phase_steps=self.state.phase_steps)
+            self.comparison_state=restore_phase(self.basis,other,
+                (Phase_step(**step) for step in saved.get("comparison_phase_steps",())))
         self.saved_shading=Shading_statistics(**saved["shading_statistics"]) if saved.get("shading_statistics") else None
         self.saved_comparison_shading=Shading_statistics(**saved["comparison_shading_statistics"]) if saved.get("comparison_shading_statistics") else None
         self.changed=False
@@ -373,6 +385,7 @@ class Viewer:
         key=event.get("key","")
         if key==" ": self.playing=not self.playing
         elif key=="Tab": self.show_ui=not self.show_ui
+        elif key.lower()=="t": self.set_tessendorf_mode(not self.tessendorf_only)
         elif key.lower()=="c":
             self.comparing=not self.comparing
             self.tessendorf_only=False
@@ -475,12 +488,12 @@ class Viewer:
         imgui.set_next_window_pos((20,height-42))
         imgui.set_next_window_bg_alpha(.65)
         imgui.begin("navigation",flags=fixed|imgui.WindowFlags_.always_auto_resize|imgui.WindowFlags_.no_inputs)
-        self._label("Alt + LMB  tumble    MMB  track    RMB  dolly    F  frame    Tab  hide UI",12,(.8,.85,.85,1))
+        self._label("Alt + LMB  tumble    MMB  track    RMB  dolly    F  frame    T  Tessendorf    Tab  hide UI",12,(.8,.85,.85,1))
         imgui.end()
 
     def _draw_comparison_labels(self,width,height,fixed):
         if self.comparing:
-            for x,label in ((width*.15,"EARLIER MODEL"),(width*.60,"ENCINO WAVES")):
+            for x,label in ((width*.15,"TESSENDORF BASELINE"),(width*.60,"ENCINO WAVES")):
                 imgui.set_next_window_pos((x,125))
                 imgui.set_next_window_bg_alpha(.65)
                 imgui.begin(label,flags=fixed|imgui.WindowFlags_.always_auto_resize|imgui.WindowFlags_.no_inputs)
@@ -502,24 +515,34 @@ class Viewer:
         changed,index=imgui.combo("##scene",self.selected_scene,[s.name for s in SCENES])
         if changed: self.select_scene(index)
         imgui.spacing()
+        changed,value=imgui.checkbox("Tessendorf baseline (T)",self.tessendorf_only)
+        if changed: self.set_tessendorf_mode(value)
+        if self.tessendorf_only:
+            imgui.text_wrapped("Early Tweak reconstruction: Phillips, cosine squared, simple reflections.")
+            self._slider("Phillips amplitude gain","phillips_amplitude",.01,10000,"%.3f",
+                         "Manual height multiplier. Original SimOcean default: 3.4375; presentation starts at 100.",True)
+            if imgui.button("Original gain: 3.4375"):
+                self.edit_parameters(phillips_amplitude=55/16)
+            self._slider("Pinch","phillips_pinch",-300,300,"%.2f","Manual horizontal displacement, independent of height gain.")
         self._slider("Wind speed","wind_speed",1,500,"%.1f m/s","Wind speed at 10 m. Edits reshape the existing waves continuously.",True)
+        imgui.begin_disabled(self.tessendorf_only)
         self._slider("Fetch","fetch_km",1,5000,"%.0f km","How far the wind has had to build the sea.",True)
-        self._slider("Ocean depth","depth",.25,1000,"%.1f m","Depth changes the wave spectrum and speed while preserving travelling-wave phase.",True)
+        imgui.end_disabled()
+        self._slider("Ocean depth","depth",.25,1000,"%.1f m",
+                     "Depth changes speed only in Tessendorf mode; it does not damp amplitude." if self.tessendorf_only else
+                     "Depth changes the wave spectrum and speed while preserving travelling-wave phase.",True)
+        imgui.begin_disabled(self.tessendorf_only)
         self._slider("Swell","swell",-1,2,"%.2f","0: empirical spreading; positive: narrower swell; -1: all directions equally.")
+        imgui.end_disabled()
         self._slider("Wind direction","wind_direction",-180,180,"%.0f degrees","Rotate the same ocean. 0 degrees is +X; 90 degrees is +Y.")
         imgui.spacing()
         imgui.separator()
-        changed,value=imgui.checkbox("Compare with earlier model",self.comparing)
+        changed,value=imgui.checkbox("Compare with Tessendorf baseline",self.comparing)
         if changed:
             self.comparing=value
             self.tessendorf_only=False
             self.changed=True
-        if imgui.is_item_hovered(): imgui.set_tooltip("Pierson-Moskowitz + cosine squared. Same seed, camera, scale and shading.")
-        changed,value=imgui.checkbox("Tessendorf mode",self.tessendorf_only)
-        if changed:
-            self.tessendorf_only=value
-            self.comparing=False
-            self.changed=True
+        if imgui.is_item_hovered(): imgui.set_tooltip("Phillips spectrum, original complex Gaussian draws, manual gain and simple shading on the left.")
         imgui.separator()
         if imgui.button("Pause" if self.playing else "Play",(116,0)): self.playing=not self.playing
         imgui.same_line()
@@ -529,7 +552,7 @@ class Viewer:
         changed,value=imgui.slider_float("Time",self.time,0,300,"%.1f s")
         if changed:
             self._seek_time(value)
-        if self._header("Foam & aeration"):
+        if not self.tessendorf_only and self._header("Foam & aeration"):
             changed,value=imgui.checkbox("Persistent foam",self.foam_parameters.enabled)
             if changed:
                 self.foam_parameters=replace(self.foam_parameters,enabled=value)
@@ -599,28 +622,37 @@ class Viewer:
             if imgui.button("Open HDR sky..."): self._open_file("sky")
         expanded=self._header("Resolution & model")
         if expanded:
+            imgui.begin_disabled(self.tessendorf_only)
             imgui.text("Directional spreading")
             models=["donelan_banner","hasselmann","mitsuyasu","cosine_squared"]
             labels=["Donelan-Banner","Hasselmann","Mitsuyasu","Cosine squared"]
             imgui.set_next_item_width(-1)
             changed,index=imgui.combo("##direction",models.index(self.parameters.spreading),labels)
             if changed: self.edit_parameters(spreading=models[index])
+            imgui.end_disabled()
             sizes=[16,32,64,128,256,512,1024,2048,4096]
             changed,index=imgui.combo("Resolution",sizes.index(self.parameters.resolution),[f"{n} x {n}" for n in sizes])
             if changed: self.edit_parameters(resolution=sizes[index])
             self._slider("Ocean patch","domain",50,4000,"%.0f m","Physical patch size; waves repeat beyond this distance.",True)
-            spectra=["tma","jonswap","pm"]
-            changed,index=imgui.combo("Spectrum",spectra.index(self.parameters.spectrum),["TMA","JONSWAP","Pierson-Moskowitz"])
-            if changed: self.edit_parameters(spectrum=spectra[index])
+            imgui.begin_disabled(self.tessendorf_only)
+            spectra=["tma","jonswap","pm","phillips"]
+            changed,index=imgui.combo("Spectrum",spectra.index(self.parameters.spectrum),["TMA","JONSWAP","Pierson-Moskowitz","Phillips baseline"])
+            if changed:
+                if spectra[index] == "phillips": self.set_tessendorf_mode(True)
+                else: self.edit_parameters(spectrum=spectra[index])
             modes=["deep","finite","capillary"]
             changed,index=imgui.combo("Dispersion",modes.index(self.parameters.dispersion),["Deep water","Finite depth","Capillary"])
             if changed: self.edit_parameters(dispersion=modes[index])
-            self._slider("Pinch","pinch",-3,3,"%.2f","Horizontal displacement; the original artist control.")
+            imgui.end_disabled()
+            if not self.tessendorf_only:
+                self._slider("Pinch","pinch",-3,3,"%.2f","Horizontal displacement; the original artist control.")
+            imgui.begin_disabled(self.tessendorf_only)
             changed,value=imgui.checkbox("Trough damping",self.parameters.trough_damping > 0)
             if changed: self.edit_parameters(trough_damping=.5 if value else 0.0)
             if imgui.is_item_hovered(): imgui.set_tooltip("Smooth ripples up to about half a metre in troughs. Coarse grids may contain no ripples at this scale. Defaults to half strength.")
             if self.parameters.trough_damping > 0:
                 self._slider("Damping amount","trough_damping",0,1,"%.2f","0 is off; 0.5 blends halfway; 1 uses the fully smoothed height in deep troughs.")
+            imgui.end_disabled()
             changed,value=imgui.input_int("Seed",self.parameters.seed)
             if changed: self.edit_parameters(seed=value%2**32)
             imgui.text_wrapped(f"{self.device.adapter.info['device']} / {self.state.device}")
