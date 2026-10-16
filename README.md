@@ -6,8 +6,9 @@ Try the live ocean at **https://blackencino.github.io/EncinoWaves/**.
 The browser edition starts from `school/gpu-showcase` and preserves the School
 sky, authored seas, camera, and performance controls. It runs locally on WebGL 2
 with 256², 512², and 1024² waves; recording and movie export are omitted.
-Choose **Controls → Quality → High** for the closest laptop rendering, or
-**Light** on a phone. See [web preview development and deployment](docs/WEB_PREVIEW.md).
+Choose **Controls → Quality → High** for the closest laptop rendering.
+iPhones start at **High (1024²)** and retain it while playback is smooth;
+older phones can step down automatically. See [web preview development and deployment](docs/WEB_PREVIEW.md).
 
 ```sh
 python3 -m http.server 8000 --directory web

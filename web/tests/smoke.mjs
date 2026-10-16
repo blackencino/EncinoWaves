@@ -134,6 +134,8 @@ try {
   activePage = page;
   captureProblems(page, 'laptop');
   const initial = await ready(page, url);
+  assert.equal(initial.quality, 'medium', 'Laptop default should remain Balanced');
+  assert.equal(initial.resolution, 512);
   report.initial = initial;
   report.graphics = await graphicsHealth(page);
   check('Laptop initializes real WebGL 2 rendering without an app error');
@@ -189,6 +191,9 @@ try {
     await page.waitForFunction(value => window.__school.getState().quality === value, quality);
     await page.waitForFunction(() => window.__school.getState().ready && document.body.dataset.ready === 'true', undefined, { timeout:90000 });
     await sleep(page, 200);
+    const selected = await state(page);
+    assert.equal(selected.qualitySource, 'manual', 'UI quality must be an authoritative manual choice');
+    assert.equal(selected.resolution, { low:256, medium:512, high:1024 }[quality]);
     await graphicsHealth(page);
   }
   check('All quality settings resize/rebuild successfully');
@@ -210,7 +215,11 @@ try {
   activePage = mobile;
   captureProblems(mobile, 'narrow');
   const mobileInitial = await ready(mobile, url);
+  assert.equal(mobileInitial.quality, 'high', 'An iPhone must start at 1024 quality');
+  assert.equal(mobileInitial.resolution, 1024, 'The actual iPhone wave grid must be 1024');
+  assert.equal(mobileInitial.qualitySource, 'iphone-auto');
   report.narrow = { initial:mobileInitial, graphics:await graphicsHealth(mobile) };
+  check('iPhone identification starts at High quality automatically');
   const layout = await mobile.evaluate(() => ({ viewport:innerWidth, body:document.body.scrollWidth,
     play:document.querySelector('#play').getBoundingClientRect().toJSON() }));
   assert.ok(layout.body <= layout.viewport + 1, `Narrow page overflows horizontally: ${JSON.stringify(layout)}`);
@@ -221,6 +230,51 @@ try {
   await mobile.locator('#settings-toggle').tap();
   await screenshot(mobile, 'narrow-settings');
   check('Narrow touch viewport renders, fits width, and can pause/open settings');
+
+  const lowUrl = new URL(url);
+  lowUrl.searchParams.set('quality','low');
+  const mobileLow = await ready(mobile, lowUrl.href);
+  assert.equal(mobileLow.quality, 'low', 'Explicit low quality must override the iPhone default');
+  assert.equal(mobileLow.resolution, 256);
+  assert.equal(mobileLow.qualitySource, 'url', 'URL quality must be authoritative');
+  report.iphoneExplicitLow = { initial:mobileLow, graphics:await graphicsHealth(mobile) };
+  check('An explicit quality=low link overrides the iPhone High default');
+  await mobile.locator('#settings-toggle').tap();
+  await mobile.locator('#quality').selectOption('high');
+  await mobile.waitForFunction(() => window.__school.getState().ready && window.__school.getState().quality === 'high', undefined, { timeout:90000 });
+  const manualIphone = await state(mobile);
+  assert.equal(manualIphone.resolution, 1024);
+  assert.equal(manualIphone.qualitySource, 'manual', 'An iPhone manual choice must disable automatic wave quality changes');
+  report.iphoneManualHigh = { state:manualIphone, graphics:await graphicsHealth(mobile) };
+  check('An iPhone manual High selection uses 1024 and takes authority over automatic quality');
+  await mobileContext.close();
+
+  const widePhoneContext = await browser.newContext({ viewport:{ width:440, height:956 }, deviceScaleFactor:3,
+    isMobile:true, hasTouch:true, userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1' });
+  const widePhone = await widePhoneContext.newPage();
+  activePage = widePhone;
+  captureProblems(widePhone, 'wide-iphone');
+  const wideInitial = await ready(widePhone, url);
+  assert.equal(wideInitial.quality, 'high', 'A wider iPhone viewport must retain the High default');
+  assert.equal(wideInitial.resolution, 1024);
+  assert.equal(wideInitial.qualitySource, 'iphone-auto');
+  report.wideIphone = { initial:wideInitial, graphics:await graphicsHealth(widePhone) };
+  await screenshot(widePhone, 'wide-iphone-high');
+  check('Wider iPhone identification also starts at High without a model-name allowlist');
+  await widePhoneContext.close();
+
+  const androidContext = await browser.newContext({ viewport:{ width:412, height:915 }, deviceScaleFactor:2,
+    isMobile:true, hasTouch:true, userAgent:'Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36' });
+  const android = await androidContext.newPage();
+  activePage = android;
+  captureProblems(android, 'android');
+  const androidInitial = await ready(android, url);
+  assert.equal(androidInitial.quality, 'low', 'Other small touch devices should retain Light quality');
+  assert.equal(androidInitial.resolution, 256);
+  assert.equal(androidInitial.qualitySource, 'default');
+  report.android = { initial:androidInitial, graphics:await graphicsHealth(android) };
+  check('Android touch-device default remains Light quality');
+  await androidContext.close();
 
   const fallback = await context.newPage();
   activePage = fallback;

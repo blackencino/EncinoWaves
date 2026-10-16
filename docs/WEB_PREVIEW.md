@@ -62,8 +62,16 @@ supplied source HDR.
 | Balanced | 512² | 400 × 240 | 1.8 million |
 | High | 1024² | 640 × 384 | 3.2 million |
 
-Laptops start at Balanced; small touch devices start at Light. Sustained slow
-frames reduce display resolution without changing the selected wave grid.
+Laptops start at Balanced; iPhones start at High (1024²); other small touch
+devices start at Light. This includes iPhone 17 Pro / Pro Max, iPhone 18 Pro /
+Pro Max, and future capable iPhones without maintaining a model whitelist.
+[Safari's device string](https://webkit.org/blog/17333/webkit-features-in-safari-26-0/)
+does not identify the hardware model, so automatic iPhone quality uses actual
+playback performance. After ten seconds of visible playback, six accumulated
+seconds below 24 fps can lower the automatic wave grid by one level. Fast frames
+clear that history; pauses, background gaps, and quality changes reset it.
+Sustained slow frames also reduce display resolution. URL and manual quality
+choices disable automatic wave-grid changes.
 `?quality=low`, `?quality=medium`, and `?quality=high` override the initial choice.
 Changing quality rebuilds the wave grid and foam history. The native School
 preview uses 2048² waves, so browser waves and foam have less fine detail,
@@ -83,6 +91,7 @@ Apache-2.0. Nimbus Sans attribution and licenses are beside the font in
 
 ```sh
 node --test web/tests/controls.test.mjs
+node --test web/tests/quality.test.mjs
 node web/tests/smoke.mjs --simulation
 node web/tests/smoke.mjs
 ```
