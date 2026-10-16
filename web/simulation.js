@@ -5,7 +5,7 @@ export const DEFAULT_PARAMETERS = Object.freeze({
   domain: 1024, wind_speed: 17, fetch_km: 300, depth: 100, swell: .35,
   spreading: 'hasselmann', spectrum: 'tma', dispersion: 'capillary',
   gravity: 9.81, surface_tension: .074, density: 1000, pinch: .75,
-  amplitude_gain: 1, phillips_amplitude: 100, seed: 54321, gamma: 3.3, wind_direction: 0,
+  amplitude_gain: 1, phillips_amplitude: 100, phillips_pinch: 75, seed: 54321, gamma: 3.3, wind_direction: 0,
   trough_damping: .5, trough_smoothing_length: .1,
 });
 
@@ -75,7 +75,7 @@ export function legacyNoiseData(resolution,seed) {
 const INITIAL = HEAD + `
 uniform sampler2D uNoise;
 uniform int uN, uSpectrum, uSpreading, uDispersion;
-uniform float uDomain, uWind, uFetch, uDepth, uSwell, uGravity, uTension, uDensity, uGamma, uPhillipsAmplitude;
+uniform float uDomain, uWind, uFetch, uDepth, uSwell, uGravity, uTension, uDensity, uGamma;
 layout(location=0) out vec4 coefficients;
 layout(location=1) out vec4 frequency;
 // Lanczos log-gamma, evaluated on positive arguments only.
@@ -133,7 +133,7 @@ void main() {
     float lengthScale=uWind*uWind/uGravity;
     float directionalPower=wave.x*wave.x/(k*k);
     float power=directionalPower*exp(-1.0/pow(k*lengthScale,2.0))/pow(k,4.0);
-    float coefficient=uPhillipsAmplitude/(uDomain*uDomain)*sqrt(max(0.0,power*.5));
+    float coefficient=sqrt(max(0.0,power*.5))/(uDomain*uDomain);
     coefficients=texelFetch(uNoise,pos,0)*coefficient;
     frequency=vec4(sqrt(uGravity*k*tanh(k*uDepth)),0,0,0);
     return;
@@ -437,11 +437,11 @@ export class WaveSimulation {
     gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.disable(gl.SCISSOR_TEST);gl.colorMask(true,true,true,true);
     const seedKey=[p.domain,p.seed,p.spectrum==='phillips'].join('/');
     if(seedKey!==this.seedKey) {this.makeNoise();this.seedKey=seedKey;this.spectrumKey='';this.statisticsKey='';}
-    const spectralKeys=['wind_speed','fetch_km','depth','swell','spectrum','spreading','dispersion','gravity','surface_tension','density','gamma','phillips_amplitude'];
+    const spectralKeys=['wind_speed','fetch_km','depth','swell','spectrum','spreading','dispersion','gravity','surface_tension','density','gamma'];
     const key=spectralKeys.map(k=>p[k]).join('/');
     if(key!==this.spectrumKey) {
       this.draw('initial',this.initial,{uN:n,uDomain:p.domain,uWind:p.wind_speed,uFetch:p.fetch_km,uDepth:p.depth,uSwell:p.swell,
-        uGravity:p.gravity,uTension:p.surface_tension,uDensity:p.density,uGamma:p.gamma,uPhillipsAmplitude:p.phillips_amplitude,
+        uGravity:p.gravity,uTension:p.surface_tension,uDensity:p.density,uGamma:p.gamma,
         uSpectrum:Math.max(0,['pm','jonswap','tma','phillips'].indexOf(p.spectrum)),
         uSpreading:Math.max(0,['hasselmann','mitsuyasu','cosine_squared','donelan_banner'].indexOf(p.spreading)),
         uDispersion:Math.max(0,['deep','finite','capillary'].indexOf(p.dispersion))},{uNoise:this.noise});
@@ -458,8 +458,10 @@ export class WaveSimulation {
       this.draw('fft',this.fft[1-current],{uStage:stage,uAxis:axis},
         {uA:this.fft[current].textures[0],uB:this.fft[current].textures[1],uButterfly:this.butterfly});current=1-current;
     }
-    this.draw('displacement',this.displacementTarget,{uPinch:p.pinch,uGain:p.amplitude_gain},{uA:this.fft[current].textures[0],uB:this.fft[current].textures[1]});
-    this.draw('normal',this.normalTarget,{uN:n,uSpacing:p.domain/n,uPinch:p.pinch,uGain:p.amplitude_gain},{uA:this.fft[current].textures[0]});
+    const legacy=p.spectrum==='phillips',pinch=legacy?p.phillips_pinch:p.pinch;
+    const gain=p.amplitude_gain*(legacy?p.phillips_amplitude:1);
+    this.draw('displacement',this.displacementTarget,{uPinch:pinch,uGain:gain},{uA:this.fft[current].textures[0],uB:this.fft[current].textures[1]});
+    this.draw('normal',this.normalTarget,{uN:n,uSpacing:p.domain/n,uPinch:pinch,uGain:gain},{uA:this.fft[current].textures[0]});
     if(p.spectrum!=='phillips') {
       const foamNext=1-this.foamIndex;
       this.draw('foam',this.foamTargets[foamNext],{uN:n,uSeed:p.seed|0,uDomain:p.domain,uDt:Math.min(dt,.25),uTime:this.time-dt*.5,
@@ -468,7 +470,7 @@ export class WaveSimulation {
         {uFoam:this.foam,uDisplacement:this.displacement});
       this.foamIndex=foamNext;this.foam=this.foamTargets[foamNext].textures[0];
     }
-    const statisticsKey=key+'/'+p.pinch+'/'+p.amplitude_gain;
+    const statisticsKey=key+'/'+pinch+'/'+gain;
     if(statisticsKey!==this.statisticsKey) {this.updateStatistics();this.statisticsKey=statisticsKey;}
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     for(const texture of [this.displacement,this.normal,this.foam]) {gl.bindTexture(gl.TEXTURE_2D,texture);gl.generateMipmap(gl.TEXTURE_2D);}

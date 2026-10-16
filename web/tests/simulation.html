@@ -35,9 +35,26 @@ try {
     results.push({label:fixtureName+' '+label,rmse,maximum});
     if(rmse>.003 || maximum>.02) throw new Error(label+' diverges from Python: '+JSON.stringify({rmse,maximum}));
   };
+  let previousDisplacement=null;
   for(let i=0;i<fixture.cases.length;i++) {
     const c=fixture.cases[i];sim.update(c.dt,c.parameters);
-    compare(read(sim.displacement),c.displacement,'displacement '+i);
+    const displacement=read(sim.displacement);
+    compare(displacement,c.displacement,'displacement '+i);
+    if(fixtureName==='legacy-reference'&&i===4) {
+      for(let j=0;j<displacement.length;j++) {
+        const expected=previousDisplacement[j]*(j%4===2?2:1);
+        if(Math.abs(displacement[j]-expected)>.00001)throw new Error('Height gain changed horizontal displacement or crest compression');
+      }
+      results.push({label:'Independent historical height gain',passed:true});
+    }
+    if(fixtureName==='legacy-reference'&&i===5) {
+      for(let j=0;j<displacement.length;j++)if(j%4!==3) {
+        const expected=previousDisplacement[j]*(j%4===2?1:-1);
+        if(Math.abs(displacement[j]-expected)>.00001)throw new Error('Negative pinch failed to reverse horizontal displacement independently');
+      }
+      results.push({label:'Independent signed historical pinch',passed:true});
+    }
+    previousDisplacement=displacement;
     compare(read(sim.normal),c.normal,'normal '+i);
   }
   const variates=randomVariates(.1,-.2,54321);

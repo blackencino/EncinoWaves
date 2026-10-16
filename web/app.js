@@ -57,7 +57,7 @@ document.addEventListener('keydown',e=>{
   if(key==='arrowleft'||key==='arrowright'){e.preventDefault();state.held[key==='arrowleft'?'left':'right']=true;state.lastInput=now;state.transition=null;return;}
   if(key===' '&&tag!=='BUTTON'){e.preventDefault();if(!e.repeat)setPlaying(!playing);return;}
   if(e.repeat)return;
-  const mode=Object.keys(controls).find(name=>controls[name].key===key);
+  const mode=Object.keys(controls).find(name=>controls[name].key===key&&controlEnabled(name,state.parameters));
   if(mode){state.selectMode(mode,now);refreshUi();}
   else if(key==='t')setWaveModel(state.parameters.spectrum!=='phillips');
   else if(key==='e')setScene(state.scene%4+1);

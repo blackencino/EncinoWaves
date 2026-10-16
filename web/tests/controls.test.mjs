@@ -77,11 +77,14 @@ test('Tessendorf controls retain manual gain between sea compositions and suppre
   c.setWaveModel(true,0);
   c.setValue('phillips_amplitude',.5,0);
   const gain=c.parameters.phillips_amplitude;
+  c.setValue('phillips_pinch',.6,0);
+  const pinch=c.parameters.phillips_pinch;
   c.selectMode('foam_amount',1);
-  assert.equal(c.mode,'phillips_amplitude');
+  assert.equal(c.mode,'phillips_pinch');
   c.setScene(2,1);c.update(3,4);
   assert.equal(c.parameters.spectrum,'phillips');
   near(c.parameters.phillips_amplitude,gain);
+  near(c.parameters.phillips_pinch,pinch);
   c.setWaveModel(false,5);
   assert.equal(c.parameters.spectrum,'tma');
   c.selectMode('phillips_amplitude',5);

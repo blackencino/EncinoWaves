@@ -30,7 +30,7 @@ def append(dt, parameters, time):
                       normal=frame.normal.flatten().tolist()))
 
 
-append(0, dict(domain=128, spectrum='phillips', seed=12345, phillips_amplitude=100), 0)
+append(0, dict(domain=128, spectrum='phillips', seed=12345, phillips_amplitude=100, phillips_pinch=75), 0)
 append(1, {}, 1)
 p = replace(p, depth=2, fetch_km=1000, swell=1.5)
 state = preserve_phase(state, make_initial_state(p, 'cpu'), 1)
@@ -39,6 +39,9 @@ append(.125, {}, 1.125)
 p = replace(p, phillips_amplitude=200)
 state = preserve_phase(state, make_initial_state(p, 'cpu'), 1.125)
 append(0, dict(phillips_amplitude=200), 1.125)
+p = replace(p, phillips_pinch=-75)
+state = preserve_phase(state, make_initial_state(p, 'cpu'), 1.125)
+append(0, dict(phillips_pinch=-75), 1.125)
 path = ROOT / 'web' / 'tests' / 'legacy-reference.json'
 path.write_text(json.dumps(dict(resolution=16, cases=cases), separators=(',', ':')) + '\n')
 print(path)

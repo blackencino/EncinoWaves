@@ -50,7 +50,8 @@ controls are hidden in historical mode because they do not affect that model.
 
 This mode follows the early Tweak/SimOcean implementation: the direct Phillips
 wavenumber spectrum, two-sided cosine-squared wind alignment, an explicit
-`AMP / domain²` coefficient scale, and finite-depth dispersion. Depth changes
+`1 / domain²` coefficient scale, independent height `AMP` and horizontal
+`PINCH` gains, and finite-depth dispersion. Depth changes
 wave speed without a depth-dependent spectrum envelope. There is no later
 frequency-based directional tuning or short-wave damping. A sequential 48-bit
 Rand48 stream and float32 polar Box–Muller reproduce its four real Gaussian
@@ -59,9 +60,11 @@ This differs from the modern signed-amplitude / independent-phase sampling.
 Historical random realizations depend on grid resolution; small floating-point
 library differences from old builds remain possible.
 
-The starting manual gain **100** is a presentation setting for the School's
-large domain. **Use archived gain · 3.4375** recalls the toy viewer's `55/16`
-setting; that viewer used a much smaller domain, so its numerical setting does
+The starting height gain **100** and horizontal pinch **75** are presentation
+settings for the School's large domain. Height gain does not change horizontal
+displacement or crest compression; pinch is an independent control. **Use archived gain · 3.4375** recalls the toy viewer's `55/16`
+height setting without altering horizontal pinch (the toy viewer's original
+`PINCH` was `60/16`); that viewer used a much smaller domain, so its numerical setting does
 not imply matching visible wave height here. Shading is deliberately simple:
 Fresnel sky reflection and a fixed water tint, with existing horizon haze. Foam,
 aeration, crest detail and volume scattering are disabled. This is a numerical
@@ -154,8 +157,9 @@ quality; High showed approximately 60 fps on this machine. Chrome's narrow
 touch viewport validates layout and basic controls, not the iOS graphics driver.
 
 The historical GPU fixture covers propagation, a phase-continuous depth change,
-inactive fetch/swell edits and doubled manual gain. It agrees with the native
-float32 reference within 0.00217 m displacement RMS and 0.000174 normal RMS,
+inactive fetch/swell edits and doubled height gain with unchanged horizontal
+displacement and crest compression, plus negative pinch. It agrees with the native
+float32 reference within 0.00190 m displacement RMS and 0.000179 normal RMS,
 including half-float texture quantization. Regenerate it with
 `tools/web_legacy_reference.py --model-root /path/to/native/checkout` using the
 native branch containing the Phillips implementation. The dedicated historical

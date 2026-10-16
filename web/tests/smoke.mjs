@@ -142,7 +142,7 @@ try {
     await page.keyboard.press('g');await page.keyboard.down('ArrowRight');await sleep(page,400);await page.keyboard.up('ArrowRight');await sleep(page,500);
     assert.ok((await state(page)).parameters.phillips_amplitude>before);
     await page.keyboard.press('p');await page.keyboard.down('ArrowLeft');await sleep(page,400);await page.keyboard.up('ArrowLeft');await sleep(page,500);
-    assert.ok((await state(page)).parameters.pinch<.75);
+    assert.ok((await state(page)).parameters.phillips_pinch<75);
     check('G gain and P pinch respond to arrow controls');
     await page.locator('#settings-toggle').click();
     assert.equal(await page.locator('#fetch_km-control').isVisible(),false);
