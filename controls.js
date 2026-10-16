@@ -17,7 +17,7 @@ export function authoredCamera(height,pitch,yaw) {
 }
 export const defaults={wind_speed:17,depth:100,fetch_km:300,swell:.35,foam_amount:1,
   domain:1024,pinch:.75,seed:54321,gravity:9.81,surface_tension:.074,density:1000,gamma:3.3,
-  amplitude_gain:1,trough_damping:1};
+  amplitude_gain:1,phillips_amplitude:100,phillips_pinch:75,trough_damping:1,spectrum:'tma'};
 export const scenes=[
   {name:'Opening ocean',parameters:{...defaults},camera:authoredCamera(145.2,-18.1,-139.9)},
   {name:'NOAA severe sea state',parameters:{...defaults,wind_speed:50*1852/3600,fetch_km:2000,depth:1000,swell:0},camera:authoredCamera(85,-13,-52)},
@@ -31,13 +31,21 @@ export const controls={
   fetch_km:{key:'f',label:'Fetch',low:1,high:5000,log:true,rate:.17},
   swell:{key:'s',label:'Swell',low:-1,high:2,log:false,rate:.22},
   foam_amount:{key:'m',label:'Foam',low:0,high:2,log:false,rate:.15},
+  phillips_amplitude:{key:'g',label:'Manual gain',low:.01,high:10000,log:true,rate:.14},
+  pinch:{key:'p',label:'Pinch',low:-3,high:3,log:false,rate:.15},
+  phillips_pinch:{key:'p',label:'Pinch',low:-300,high:300,log:false,rate:.15},
 };
+export function controlEnabled(name,parameters) {
+  const legacy=parameters.spectrum==='phillips';
+  return legacy?!['fetch_km','swell','foam_amount','pinch'].includes(name):!['phillips_amplitude','phillips_pinch'].includes(name);
+}
 export function position(name,value) { const c=controls[name]; return clamp(c.log?Math.log(value/c.low)/Math.log(c.high/c.low):(value-c.low)/(c.high-c.low),0,1); }
 export function valueAt(name,value) { const c=controls[name],p=clamp(value,0,1); return c.log?c.low*Math.exp(p*Math.log(c.high/c.low)):c.low+p*(c.high-c.low); }
 export function formatValue(name,value) {
   if(name==='wind_speed') return `${(value*3600/1852).toFixed(1)} knots`;
   if(name==='depth') return `${value.toFixed(1)} meters`;
   if(name==='fetch_km') return `${value.toFixed(0)} kilometers`;
+  if(name==='phillips_amplitude') return value.toFixed(value<10?3:1);
   if(name==='foam_amount') return `${(100*value).toFixed(0)}%`;
   return value.toFixed(2);
 }
@@ -61,9 +69,11 @@ export function interpolateCamera(a,b,t) {
 }
 export class SchoolControls {
   constructor(){this.parameters={...defaults};this.camera={...scenes[0].camera};this.mode=null;this.velocity={};this.held={left:false,right:false};this.scene=0;this.transition=null;this.lastInput=0;}
-  selectMode(name,now){this.mode=this.mode===name?null:name;this.lastInput=now;this.transition=null;}
-  setValue(name,value,now){this.parameters[name]=valueAt(name,value);this.velocity[name]=0;this.mode=name;this.lastInput=now;this.transition=null;}
-  setScene(index,now,immediate=false){const s=scenes[index];if(!s)return;this.scene=index;this.mode=null;this.velocity={};this.lastInput=now;
+  setWaveModel(legacy,now){this.parameters.spectrum=legacy?'phillips':'tma';this.transition=null;this.mode=null;this.velocity={};this.held={left:false,right:false};this.lastInput=now;}
+  selectMode(name,now){if(!controlEnabled(name,this.parameters))return;this.mode=this.mode===name?null:name;this.lastInput=now;this.transition=null;}
+  setValue(name,value,now){if(!controlEnabled(name,this.parameters))return;this.parameters[name]=valueAt(name,value);this.velocity[name]=0;this.mode=name;this.lastInput=now;this.transition=null;}
+  setScene(index,now,immediate=false){const authored=scenes[index];if(!authored)return;
+    const s={...authored,parameters:{...authored.parameters,spectrum:this.parameters.spectrum,phillips_amplitude:this.parameters.phillips_amplitude,phillips_pinch:this.parameters.phillips_pinch}};this.scene=index;this.mode=null;this.velocity={};this.lastInput=now;
     if(immediate){this.parameters={...s.parameters};this.camera={...s.camera};this.transition=null;}
     else this.transition={at:now,parameters:{...this.parameters},camera:{...this.camera},target:s};
   }

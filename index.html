@@ -11,11 +11,12 @@
 </head>
 <body>
   <main id="stage" aria-label="Interactive ocean viewer">
-    <canvas id="ocean" aria-label="Animated ocean. Drag to orbit, scroll to dolly. Use W, D, F, S, or M and arrow keys to change the sea."></canvas>
+    <canvas id="ocean" aria-label="Animated ocean. Drag to orbit, scroll to dolly. Use T to toggle Tessendorf mode; W, D, F, S, M, G, or P and arrow keys to change the sea."></canvas>
     <div id="telemetry" class="telemetry" hidden></div>
     <div id="camera-telemetry" class="telemetry camera-telemetry" hidden></div>
     <div id="performance" aria-live="off"><div><span id="left-arrow">←</span><span id="control-label"></span><span id="right-arrow">→</span></div><div id="control-value"></div></div>
     <div id="scene-label"></div>
+    <div id="model-label" hidden></div>
     <div id="loading" role="status"><h1>Encino Waves</h1><p>Interactive Ocean Synthesis</p><p class="byline">Christopher Jon Horvath</p><div class="loading-line"></div><p id="loading-message">Preparing the ocean and HDR sky…</p></div>
     <div id="error" role="alert" hidden><h1>The ocean couldn’t start</h1><p id="error-message"></p><button id="retry">Try again at lower quality</button></div>
     <header id="identity"><span>Encino Waves</span><span>Christopher Jon Horvath</span></header>
@@ -28,11 +29,13 @@
     </nav>
     <aside id="settings" aria-label="Ocean controls" hidden>
       <div class="panel-heading"><h2>Ocean controls</h2><button id="close-settings" aria-label="Close controls">×</button></div>
+      <label class="select-label" for="wave-model">Wave model <kbd>T</kbd></label><select id="wave-model"><option value="encino">Encino Waves</option><option value="tessendorf">Tessendorf · early Tweak</option></select>
+      <div id="legacy-note" hidden><p>Phillips spectrum · cosine squared spreading.<br>Depth changes speed, not amplitude.<br>Adjust manual gain and pinch to tune the sea.</p><button id="source-gain">Use archived gain · 3.4375</button></div>
       <label class="select-label" for="scene">Sea</label><select id="scene"><option value="0">Opening ocean</option><option value="1">NOAA severe sea state</option><option value="2">Shallow choppy bay</option><option value="3">Calm deep seas</option><option value="4">Choppy shallow water</option></select>
       <div id="sliders"></div>
       <div class="select-row"><label for="quality">Quality</label><select id="quality"><option value="low">Light · 256</option><option value="medium">Balanced · 512</option><option value="high">High · 1024</option></select></div>
       <button id="reset">Reset opening ocean</button>
-      <details id="help"><summary>Keyboard &amp; camera</summary><p><kbd>W</kbd> wind &nbsp; <kbd>D</kbd> depth &nbsp; <kbd>F</kbd> fetch<br><kbd>S</kbd> swell &nbsp; <kbd>M</kbd> foam<br>Hold <kbd>←</kbd> / <kbd>→</kbd> to adjust. Press the mode key again to dismiss.</p><p><kbd>E</kbd> next sea &nbsp; <kbd>Space</kbd> pause<br><kbd>I</kbd> sea info &nbsp; <kbd>C</kbd> camera info<br><kbd>Tab</kbd> controls &nbsp; <kbd>H</kbd> hide interface</p><p>Drag or Alt + left drag to orbit.<br>Ctrl + left / Alt + middle drag to track.<br>Scroll or Shift + left / Alt + right drag to dolly.</p></details>
+      <details id="help"><summary>Keyboard &amp; camera</summary><p><kbd>W</kbd> wind &nbsp; <kbd>D</kbd> depth &nbsp; <kbd>F</kbd> fetch<br><kbd>S</kbd> swell &nbsp; <kbd>M</kbd> foam<br><kbd>T</kbd> Tessendorf mode<br><kbd>G</kbd> manual gain &nbsp; <kbd>P</kbd> pinch<br>Hold <kbd>←</kbd> / <kbd>→</kbd> to adjust. Press the mode key again to dismiss.</p><p><kbd>E</kbd> next sea &nbsp; <kbd>Space</kbd> pause<br><kbd>I</kbd> sea info &nbsp; <kbd>C</kbd> camera info<br><kbd>Tab</kbd> controls &nbsp; <kbd>H</kbd> hide interface</p><p>Drag or Alt + left drag to orbit.<br>Ctrl + left / Alt + middle drag to track.<br>Scroll or Shift + left / Alt + right drag to dolly.</p></details>
       <p class="about">A live spectral ocean, from the School viewer.<br>Illustrative sea states; not measured sea data.<br><a href="./credits.html" target="_blank" rel="noopener">About &amp; credits</a> <span id="status"></span></p>
     </aside>
     <div id="hint">Drag to explore · <kbd>E</kbd> next sea · <kbd>W</kbd> then <kbd>←</kbd> <kbd>→</kbd> to change wind</div>
