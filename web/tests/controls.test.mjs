@@ -70,3 +70,22 @@ test('camera interpolation crosses the nearest yaw boundary smoothly', () => {
   near(Math.abs(middle.yaw),180);
   pivot(middle).forEach(value=>near(value,0,1e-8));
 });
+
+
+test('Tessendorf controls retain manual gain between sea compositions and suppress modern-only controls', () => {
+  const c=new SchoolControls();
+  c.setWaveModel(true,0);
+  c.setValue('phillips_amplitude',.5,0);
+  const gain=c.parameters.phillips_amplitude;
+  c.selectMode('foam_amount',1);
+  assert.equal(c.mode,'phillips_amplitude');
+  c.setScene(2,1);c.update(3,4);
+  assert.equal(c.parameters.spectrum,'phillips');
+  near(c.parameters.phillips_amplitude,gain);
+  c.setWaveModel(false,5);
+  assert.equal(c.parameters.spectrum,'tma');
+  c.selectMode('phillips_amplitude',5);
+  assert.equal(c.mode,null);
+  c.selectMode('wind_speed',5);
+  assert.equal(c.mode,'wind_speed');
+});

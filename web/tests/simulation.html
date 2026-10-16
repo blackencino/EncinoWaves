@@ -13,7 +13,8 @@ const results=[];
 try {
   const gl=document.querySelector('#gpu').getContext('webgl2');
   if(!gl) throw new Error('WebGL 2 unavailable');
-  const fixture=await (await fetch('./reference.json')).json();
+  for(const fixtureName of ['reference','legacy-reference']) {
+  const fixture=await (await fetch('./'+fixtureName+'.json')).json();
   const sim=new WaveSimulation(gl,fixture.resolution);
   const read=(texture)=>{
     const fb=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
@@ -31,7 +32,7 @@ try {
       sum+=difference*difference;maximum=Math.max(maximum,difference);
     }
     const rmse=Math.sqrt(sum/actual.length);
-    results.push({label,rmse,maximum});
+    results.push({label:fixtureName+' '+label,rmse,maximum});
     if(rmse>.003 || maximum>.02) throw new Error(label+' diverges from Python: '+JSON.stringify({rmse,maximum}));
   };
   for(let i=0;i<fixture.cases.length;i++) {
@@ -43,6 +44,7 @@ try {
   const expected=[-.9266252707198547,.38899938899406633,.46060218204398157,4.745353914832242];
   if(variates.some((v,i)=>Math.abs(v-expected[i])>1e-14)) throw new Error('PCG seed mismatch');
   sim.dispose();
+  }
   window.testResult={passed:true,results};
   output.textContent='PASS\n'+JSON.stringify(window.testResult,null,2);
 } catch(error) {

@@ -21,6 +21,8 @@ opening `index.html` as a `file:` URL is not supported.
 | Input | Action |
 | --- | --- |
 | W / D / F / S / M | Select wind / depth / fetch / swell / foam |
+| T | Toggle Tessendorf / Encino Waves |
+| G / P | Select historical manual gain / pinch |
 | Left / right arrow | Accelerate the selected control, then glide to rest |
 | E / Next sea | Cycle the four authored School examples |
 | Space / Play or Pause | Pause or resume waves and foam |
@@ -37,6 +39,33 @@ parameters, cameras, and 40.735° vertical lens. Example changes take three
 seconds. Reset opening ocean restores that starting composition. Touch devices
 can drag to orbit and use the visible controls; a dedicated multitouch camera
 interaction has not been added.
+
+## Historical Tessendorf comparison
+
+Press **T**, or choose **Tessendorf · early Tweak** in Controls. A direct link
+can use `?model=tessendorf`; quality overrides still work. **G** selects manual
+amplitude gain and **P** selects pinch, both adjusted with the arrow keys.
+The selected model and manual gain survive sea changes. Fetch, swell and foam
+controls are hidden in historical mode because they do not affect that model.
+
+This mode follows the early Tweak/SimOcean implementation: the direct Phillips
+wavenumber spectrum, two-sided cosine-squared wind alignment, an explicit
+`AMP / domain²` coefficient scale, and finite-depth dispersion. Depth changes
+wave speed without a depth-dependent spectrum envelope. There is no later
+frequency-based directional tuning or short-wave damping. A sequential 48-bit
+Rand48 stream and float32 polar Box–Muller reproduce its four real Gaussian
+draws per nonzero half-plane bin, forming two independent complex coefficients.
+This differs from the modern signed-amplitude / independent-phase sampling.
+Historical random realizations depend on grid resolution; small floating-point
+library differences from old builds remain possible.
+
+The starting manual gain **100** is a presentation setting for the School's
+large domain. **Use archived gain · 3.4375** recalls the toy viewer's `55/16`
+setting; that viewer used a much smaller domain, so its numerical setting does
+not imply matching visible wave height here. Shading is deliberately simple:
+Fresnel sky reflection and a fixed water tint, with existing horizon haze. Foam,
+aeration, crest detail and volume scattering are disabled. This is a numerical
+comparison in the current viewer, not a reconstruction of the old renderer.
 
 ## Rendering and fidelity
 
@@ -92,8 +121,10 @@ Apache-2.0. Nimbus Sans attribution and licenses are beside the font in
 ```sh
 node --test web/tests/controls.test.mjs
 node --test web/tests/quality.test.mjs
+node --test web/tests/legacy-random.test.mjs
 node web/tests/smoke.mjs --simulation
 node web/tests/smoke.mjs
+node web/tests/smoke.mjs --tessendorf
 ```
 
 The browser tests need Playwright or `playwright-core` and an installed Chrome.
@@ -121,6 +152,15 @@ at most 0.000779 m, maximum absolute error 0.003835 m, and normal RMS error belo
 Actual macOS Safari also rendered the opening, example transitions, and High
 quality; High showed approximately 60 fps on this machine. Chrome's narrow
 touch viewport validates layout and basic controls, not the iOS graphics driver.
+
+The historical GPU fixture covers propagation, a phase-continuous depth change,
+inactive fetch/swell edits and doubled manual gain. It agrees with the native
+float32 reference within 0.00217 m displacement RMS and 0.000174 normal RMS,
+including half-float texture quantization. Regenerate it with
+`tools/web_legacy_reference.py --model-root /path/to/native/checkout` using the
+native branch containing the Phillips implementation. The dedicated historical
+browser check covers the mode toggle, gain/pinch controls, archived gain,
+scene changes, 1024 resolution and a narrow touch viewport.
 
 ## Publish to GitHub Pages
 

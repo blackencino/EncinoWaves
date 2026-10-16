@@ -20,7 +20,7 @@ precision highp int;
 const float pi=3.141592653589793;
 uniform vec3 eye,forward,right,up;
 uniform float tanFov,aspect,exposure,skyRotation,skyGain,haze,oceanRotation,domain,waveSize;
-uniform float bigHeight,foamStrength,aeration,crestStrength,skyScale,reflectionScale,reflectionLevels;
+uniform float bigHeight,foamStrength,aeration,crestStrength,skyScale,reflectionScale,reflectionLevels,tessendorfMode;
 uniform vec2 grid;
 uniform vec3 diffuseSH[9],ambientSH[9],sunDirection,sunIrradiance;
 uniform sampler2D skyTexture,reflectionTexture,displacements,normals,foamTexture,foamMaterial,foamDetail;
@@ -188,6 +188,14 @@ void main(){
   normal=normalize(normal+view*1e-5);
   float nv=clamp(dot(normal,view),0.,1.);
   vec3 reflection=reflect(-view,normal);
+  if(tessendorfMode>.5){
+    // Deliberately simple presentation material: sky reflection and fixed water
+    // tint only. No foam, aeration, crest sparkle or volume scattering.
+    float reflectance=fresnelDielectric(nv);
+    vec3 color=mix(vec3(.008,.025,.035),environment(reflection,0.),reflectance);
+    fragmentColor=vec4(displayColor(atmosphere(color,world,-view)),1.);
+    return;
+  }
   float slope=sqrt(.025*.025+max(0.,2.*(1.-normalLength)/normalLength));
   float roughness=clamp(sqrt(slope),.04,.8);
   float reflectance=environmentBRDF(nv,roughness);
@@ -378,6 +386,7 @@ export class OceanRenderer {
     scalar('domain',sim.domain??1024);scalar('waveSize',sim.resolution);
     scalar('bigHeight',statistics.big_height??sim.bigHeight??10);
     scalar('foamStrength',look.foam);scalar('aeration',look.aeration);
+    scalar('tessendorfMode',sim.parameters?.spectrum==='phillips'?1:0);
     scalar('crestStrength',look.crest_crumble?look.crest_crumble_strength:0);
     scalar('skyScale',this.metadata.sky.scale);scalar('reflectionScale',this.metadata.reflection.scale);
     scalar('reflectionLevels',this.metadata.reflection.levels.length-1);scalar('materialSize',this.materialSize);
@@ -396,9 +405,12 @@ export class OceanRenderer {
     gl.disable(gl.SCISSOR_TEST);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.disable(gl.DEPTH_TEST);
     gl.colorMask(true,true,true,true);gl.depthMask(true);
     // Area coverage is filtered after the nonlinear material, retaining distant whitecaps.
-    gl.bindFramebuffer(gl.FRAMEBUFFER,this.materialFramebuffer);gl.viewport(0,0,this.materialSize,this.materialSize);
-    gl.bindVertexArray(this.emptyVAO);this.bindUniforms(this.materialProgram,sim,camera,look,width,height);gl.drawArrays(gl.TRIANGLES,0,3);
-    gl.bindTexture(gl.TEXTURE_2D,this.material);gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindVertexArray(this.emptyVAO);
+    if(sim.parameters?.spectrum!=='phillips') {
+      gl.bindFramebuffer(gl.FRAMEBUFFER,this.materialFramebuffer);gl.viewport(0,0,this.materialSize,this.materialSize);
+      this.bindUniforms(this.materialProgram,sim,camera,look,width,height);gl.drawArrays(gl.TRIANGLES,0,3);
+      gl.bindTexture(gl.TEXTURE_2D,this.material);gl.generateMipmap(gl.TEXTURE_2D);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,width,height);
     gl.clearDepth(1);gl.clear(gl.DEPTH_BUFFER_BIT);
     this.bindUniforms(this.skyProgram,sim,camera,look,width,height);gl.drawArrays(gl.TRIANGLES,0,3);

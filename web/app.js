@@ -1,5 +1,5 @@
 // Copyright 2026 Christopher Jon Horvath. Apache-2.0.
-import {SchoolControls,controls,scenes,position,formatValue,cameraGesture,clamp} from './controls.js';
+import {SchoolControls,controls,scenes,controlEnabled,position,formatValue,cameraGesture,clamp} from './controls.js';
 import {WaveSimulation} from './simulation.js';
 import {OceanRenderer} from './renderer.js';
 import {initialQuality,IPhoneQualityGuard} from './quality.js';
@@ -7,7 +7,8 @@ import {initialQuality,IPhoneQualityGuard} from './quality.js';
 const $=id=>document.getElementById(id),canvas=$('ocean'),state=new SchoolControls();
 const profiles={low:{resolution:256,pixels:1000000,ratio:1,mesh:[240,144]},medium:{resolution:512,pixels:1800000,ratio:1.5,mesh:[400,240]},high:{resolution:1024,pixels:3200000,ratio:2,mesh:[640,384]}};
 const mobile=navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<850;
-const requested=new URLSearchParams(location.search).get('quality');
+const query=new URLSearchParams(location.search),requested=query.get('quality');
+if(query.get('model')==='tessendorf')state.setWaveModel(true,0);
 const initial=initialQuality({requested,userAgent:navigator.userAgent,platform:navigator.platform,maxTouchPoints:navigator.maxTouchPoints,width:screen.width,height:screen.height});
 let quality=initial.quality,qualitySource=initial.source;
 const qualityGuard=new IPhoneQualityGuard();
@@ -23,6 +24,7 @@ function resize(){if(!gl)return;const p=profiles[quality],r=canvas.getBoundingCl
 }
 function setPlaying(value){playing=value;$('play').textContent=playing?'Pause':'Play';$('play').setAttribute('aria-label',playing?'Pause ocean':'Play ocean');$('paused').hidden=playing;}
 function setScene(index,immediate=false){state.setScene(index,now,immediate);$('scene').value=String(index);sceneNotice=now;refreshUi();}
+function setWaveModel(legacy){state.setWaveModel(legacy,now);sceneNotice=now;refreshUi();}
 function clearHeld(){state.held.left=false;state.held.right=false;pointer=null;}
 function togglePanel(force){$('settings').hidden=force===undefined?!$('settings').hidden:!force;$('settings-toggle').setAttribute('aria-expanded',String(!$('settings').hidden));}
 function toggleInfo(){const el=$('telemetry');el.hidden=!el.hidden;$('info').setAttribute('aria-pressed',String(!el.hidden));refreshUi();}
@@ -30,7 +32,7 @@ function cleanMode(){document.body.classList.toggle('clean');$('settings').hidde
 async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else if($('stage').requestFullscreen)await $('stage').requestFullscreen();}catch(e){$('status').textContent='Fullscreen unavailable';}}
 
 for(const [name,c] of Object.entries(controls)){
-  const row=document.createElement('div');row.className='control';
+  const row=document.createElement('div');row.className='control';row.id=name+'-control';
   const heading=document.createElement('div');heading.className='slider-heading';
   const label=document.createElement('label');label.htmlFor=name;label.textContent=c.label+' ';
   const key=document.createElement('kbd');key.textContent=c.key.toUpperCase();label.append(key);
@@ -38,6 +40,8 @@ for(const [name,c] of Object.entries(controls)){
   const input=document.createElement('input');input.type='range';input.id=name;input.min='0';input.max='1000';input.step='1';input.value=String(position(name,state.parameters[name])*1000);
   input.addEventListener('input',()=>{state.setValue(name,Number(input.value)/1000,now);refreshUi();});row.append(heading,input);$('sliders').append(row);
 }
+$('wave-model').onchange=e=>setWaveModel(e.target.value==='tessendorf');
+$('source-gain').onclick=()=>{state.transition=null;state.parameters.phillips_amplitude=55/16;state.velocity.phillips_amplitude=0;state.mode='phillips_amplitude';state.lastInput=now;refreshUi();};
 $('play').onclick=()=>setPlaying(!playing);$('next-scene').onclick=()=>setScene(state.scene%4+1);$('scene').onchange=e=>setScene(Number(e.target.value));
 $('reset').onclick=()=>{setScene(0);setPlaying(true);};$('settings-toggle').onclick=()=>togglePanel();$('close-settings').onclick=()=>togglePanel(false);
 $('info').onclick=toggleInfo;$('fullscreen').onclick=fullscreen;$('quality').value=quality;$('quality').onchange=e=>setQuality(e.target.value);
@@ -55,6 +59,7 @@ document.addEventListener('keydown',e=>{
   if(e.repeat)return;
   const mode=Object.keys(controls).find(name=>controls[name].key===key);
   if(mode){state.selectMode(mode,now);refreshUi();}
+  else if(key==='t')setWaveModel(state.parameters.spectrum!=='phillips');
   else if(key==='e')setScene(state.scene%4+1);
   else if(key==='i')toggleInfo();
   else if(key==='c'){$('camera-telemetry').hidden=!$('camera-telemetry').hidden;refreshUi();}
@@ -71,8 +76,11 @@ window.addEventListener('resize',resize);canvas.addEventListener('webglcontextlo
 canvas.addEventListener('webglcontextrestored',()=>location.reload());
 
 function refreshUi(){
-  for(const name of Object.keys(controls)){const text=formatValue(name,state.parameters[name]);$(name+'-value').textContent=text;$(name).value=String(Math.round(position(name,state.parameters[name])*1000));$(name).setAttribute('aria-valuetext',text);}
-  const rows=Object.entries(controls).filter(([name])=>name!=='foam_amount');
+  const legacy=state.parameters.spectrum==='phillips';
+  $('wave-model').value=legacy?'tessendorf':'encino';$('legacy-note').hidden=!legacy;
+  $('model-label').textContent=legacy?'Tessendorf · early Tweak':'';$('model-label').hidden=!legacy;
+  for(const name of Object.keys(controls)){const text=formatValue(name,state.parameters[name]);$(name+'-control').hidden=!controlEnabled(name,state.parameters);$(name+'-value').textContent=text;$(name).value=String(Math.round(position(name,state.parameters[name])*1000));$(name).setAttribute('aria-valuetext',text);}
+  const rows=Object.entries(controls).filter(([name])=>name!=='foam_amount'&&controlEnabled(name,state.parameters));
   $('telemetry').replaceChildren(...rows.map(([name,c])=>{const row=document.createElement('div'),label=document.createElement('span'),value=document.createElement('b');label.textContent=c.label;value.textContent=formatValue(name,state.parameters[name]);row.append(label,value);return row;}));
   $('camera-telemetry').textContent='';
   for(const [label,value] of [['Height',state.camera.height.toFixed(1)+' meters'],['Pitch',state.camera.pitch.toFixed(1)+' degrees'],['Yaw',state.camera.yaw.toFixed(1)+' degrees'],['FOV',state.camera.fov.toFixed(1)+' degrees']]){const row=document.createElement('div'),a=document.createElement('span'),b=document.createElement('b');a.textContent=label;b.textContent=value;row.append(a,b);$('camera-telemetry').append(row);}
@@ -84,6 +92,7 @@ function refreshUi(){
 }
 
 async function warmFoam(){
+  if(state.parameters.spectrum==='phillips'){simulation.update(0,state.parameters);return;}
   // Build the same six seconds of history as the live viewer; yield for UI.
   for(let i=0;i<48;i++){simulation.update(1/8,state.parameters);if(i%8===7)await nextPaint();}
 }
@@ -102,7 +111,7 @@ function tick(timestamp){requestAnimationFrame(tick);if(!ready||contextLost||doc
     if(automaticQuality)setQuality(automaticQuality,true);
   }catch(e){fail(e);}
 }
-window.__school={getState:()=>({ready,playing,parameters:{...state.parameters},camera:{...state.camera},quality,qualitySource,resolution:simulation?.resolution||0,time:simulation?.time||0,frames,scene:state.scene,renderer:'WebGL 2',error}),setScene:index=>setScene(index),setQuality};
+window.__school={getState:()=>({ready,playing,parameters:{...state.parameters},camera:{...state.camera},quality,qualitySource,resolution:simulation?.resolution||0,time:simulation?.time||0,frames,scene:state.scene,renderer:'WebGL 2',error}),setScene:index=>setScene(index),setQuality,setWaveModel};
 async function start(){
   try{gl=canvas.getContext('webgl2',{alpha:false,antialias:true,depth:true,powerPreference:mobile?'default':'high-performance',preserveDrawingBuffer:false});
     if(!gl)throw new Error('This viewer needs WebGL 2. Try a current Safari, Chrome, Edge, or Firefox with graphics acceleration enabled.');

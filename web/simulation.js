@@ -5,7 +5,7 @@ export const DEFAULT_PARAMETERS = Object.freeze({
   domain: 1024, wind_speed: 17, fetch_km: 300, depth: 100, swell: .35,
   spreading: 'hasselmann', spectrum: 'tma', dispersion: 'capillary',
   gravity: 9.81, surface_tension: .074, density: 1000, pinch: .75,
-  amplitude_gain: 1, seed: 54321, gamma: 3.3, wind_direction: 0,
+  amplitude_gain: 1, phillips_amplitude: 100, seed: 54321, gamma: 3.3, wind_direction: 0,
   trough_damping: .5, trough_smoothing_length: .1,
 });
 
@@ -41,10 +41,41 @@ export function randomVariates(kx, ky, seed) {
     2*Math.PI*values[2],2*Math.PI*values[3]];
 }
 
+// The early Tweak implementation used a sequential POSIX drand48 stream and
+// float32 polar Box–Muller draws (including its cached-pair return order).
+// A split 24-bit state keeps the 48-bit integer multiply exact in JavaScript.
+export function legacyGaussianGenerator(seed) {
+  let hi=(seed>>>8),lo=((seed&255)*65536)+0x330e,cached=null;
+  const f=Math.fround,base=16777216,a=0xece66d,b=0x5de;
+  function uniform() {
+    const product=lo*a+11,carry=Math.floor(product/base);
+    hi=(hi*a+lo*b+carry)%base;lo=product%base;
+    return f((hi*base+lo)/281474976710656);
+  }
+  return () => {
+    if(cached!==null){const result=cached;cached=null;return result;}
+    let x,y,r;
+    do {x=f(-1+f(2*uniform()));y=f(-1+f(2*uniform()));r=f(f(x*x)+f(y*y));} while(r>1||r===0);
+    const scale=f(Math.sqrt(f(f(-2*f(Math.log(r)))/r)));
+    cached=f(x*scale);return f(y*scale);
+  };
+}
+
+export function legacyNoiseData(resolution,seed) {
+  const width=resolution/2+1,data=new Float32Array(resolution*width*4),gaussian=legacyGaussianGenerator(seed);
+  for(let y=0;y<resolution;y++)for(let x=0;x<width;x++) {
+    if(x===0&&y===0)continue;
+    const i=(y*width+x)*4,re=gaussian(),im=gaussian(),negativeRe=gaussian(),negativeIm=gaussian();
+    // Our propagation is A exp(-iwt)+B exp(+iwt): A=conj(h0(-k)), B=h0(k).
+    data.set([negativeRe,-negativeIm,re,im],i);
+  }
+  return data;
+}
+
 const INITIAL = HEAD + `
 uniform sampler2D uNoise;
 uniform int uN, uSpectrum, uSpreading, uDispersion;
-uniform float uDomain, uWind, uFetch, uDepth, uSwell, uGravity, uTension, uDensity, uGamma;
+uniform float uDomain, uWind, uFetch, uDepth, uSwell, uGravity, uTension, uDensity, uGamma, uPhillipsAmplitude;
 layout(location=0) out vec4 coefficients;
 layout(location=1) out vec4 frequency;
 // Lanczos log-gamma, evaluated on positive arguments only.
@@ -96,6 +127,17 @@ void main() {
   vec2 wave=vec2(float(pos.x),float(pos.y<=uN/2?pos.y:pos.y-uN))*(TAU/uDomain);
   float k=length(wave);
   if(k==0.0) { coefficients=vec4(0); frequency=vec4(0); return; }
+  if(uSpectrum==3) {
+    // Direct wavenumber Phillips spectrum: no omega Jacobian, depth envelope,
+    // fetch, short-wave damping or modern normalized directional spreading.
+    float lengthScale=uWind*uWind/uGravity;
+    float directionalPower=wave.x*wave.x/(k*k);
+    float power=directionalPower*exp(-1.0/pow(k*lengthScale,2.0))/pow(k,4.0);
+    float coefficient=uPhillipsAmplitude/(uDomain*uDomain)*sqrt(max(0.0,power*.5));
+    coefficients=texelFetch(uNoise,pos,0)*coefficient;
+    frequency=vec4(sqrt(uGravity*k*tanh(k*uDepth)),0,0,0);
+    return;
+  }
   float th=uDispersion==0?1.0:tanh(k*uDepth);
   float tension=uDispersion==2?k*k*uTension/uDensity:0.0;
   float omega=sqrt(k*(uGravity+tension)*th);
@@ -371,8 +413,9 @@ export class WaveSimulation {
   }
 
   makeNoise() {
-    const gl=this.gl,n=this.resolution,width=n/2+1,data=new Float32Array(width*n*4),dk=2*Math.PI/this.domain;
-    for(let y=0;y<n;y++) for(let x=0;x<width;x++) {
+    const gl=this.gl,n=this.resolution,width=n/2+1,legacy=this.parameters.spectrum==='phillips';
+    const data=legacy?legacyNoiseData(n,this.parameters.seed):new Float32Array(width*n*4),dk=2*Math.PI/this.domain;
+    if(!legacy)for(let y=0;y<n;y++) for(let x=0;x<width;x++) {
       const [a,b,pa,pb]=randomVariates(x*dk,(y<=n/2?y:y-n)*dk,this.parameters.seed),i=(y*width+x)*4;
       data[i]=a*Math.cos(pa);data[i+1]=-a*Math.sin(pa);data[i+2]=b*Math.cos(pb);data[i+3]=-b*Math.sin(pb);
     }
@@ -392,14 +435,14 @@ export class WaveSimulation {
     const gl=this.gl,n=this.resolution;
     this.parameters={...this.parameters,...parameters};const p=this.parameters;this.domain=p.domain;
     gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.disable(gl.SCISSOR_TEST);gl.colorMask(true,true,true,true);
-    const seedKey=[p.domain,p.seed].join('/');
+    const seedKey=[p.domain,p.seed,p.spectrum==='phillips'].join('/');
     if(seedKey!==this.seedKey) {this.makeNoise();this.seedKey=seedKey;this.spectrumKey='';this.statisticsKey='';}
-    const spectralKeys=['wind_speed','fetch_km','depth','swell','spectrum','spreading','dispersion','gravity','surface_tension','density','gamma'];
+    const spectralKeys=['wind_speed','fetch_km','depth','swell','spectrum','spreading','dispersion','gravity','surface_tension','density','gamma','phillips_amplitude'];
     const key=spectralKeys.map(k=>p[k]).join('/');
     if(key!==this.spectrumKey) {
       this.draw('initial',this.initial,{uN:n,uDomain:p.domain,uWind:p.wind_speed,uFetch:p.fetch_km,uDepth:p.depth,uSwell:p.swell,
-        uGravity:p.gravity,uTension:p.surface_tension,uDensity:p.density,uGamma:p.gamma,
-        uSpectrum:Math.max(0,['pm','jonswap','tma'].indexOf(p.spectrum)),
+        uGravity:p.gravity,uTension:p.surface_tension,uDensity:p.density,uGamma:p.gamma,uPhillipsAmplitude:p.phillips_amplitude,
+        uSpectrum:Math.max(0,['pm','jonswap','tma','phillips'].indexOf(p.spectrum)),
         uSpreading:Math.max(0,['hasselmann','mitsuyasu','cosine_squared','donelan_banner'].indexOf(p.spreading)),
         uDispersion:Math.max(0,['deep','finite','capillary'].indexOf(p.dispersion))},{uNoise:this.noise});
       this.spectrumKey=key;
@@ -417,12 +460,14 @@ export class WaveSimulation {
     }
     this.draw('displacement',this.displacementTarget,{uPinch:p.pinch,uGain:p.amplitude_gain},{uA:this.fft[current].textures[0],uB:this.fft[current].textures[1]});
     this.draw('normal',this.normalTarget,{uN:n,uSpacing:p.domain/n,uPinch:p.pinch,uGain:p.amplitude_gain},{uA:this.fft[current].textures[0]});
-    const foamNext=1-this.foamIndex;
-    this.draw('foam',this.foamTargets[foamNext],{uN:n,uSeed:p.seed|0,uDomain:p.domain,uDt:Math.min(dt,.25),uTime:this.time-dt*.5,
-      uEmission:p.foam_enabled===false?0:(p.foam_emission??1.2),uBreakup:p.foam_breakup??1,
-      uThreshold:p.compression_threshold??.75,uWidth:p.compression_width??.15},
-      {uFoam:this.foam,uDisplacement:this.displacement});
-    this.foamIndex=foamNext;this.foam=this.foamTargets[foamNext].textures[0];
+    if(p.spectrum!=='phillips') {
+      const foamNext=1-this.foamIndex;
+      this.draw('foam',this.foamTargets[foamNext],{uN:n,uSeed:p.seed|0,uDomain:p.domain,uDt:Math.min(dt,.25),uTime:this.time-dt*.5,
+        uEmission:p.foam_enabled===false?0:(p.foam_emission??1.2),uBreakup:p.foam_breakup??1,
+        uThreshold:p.compression_threshold??.75,uWidth:p.compression_width??.15},
+        {uFoam:this.foam,uDisplacement:this.displacement});
+      this.foamIndex=foamNext;this.foam=this.foamTargets[foamNext].textures[0];
+    }
     const statisticsKey=key+'/'+p.pinch+'/'+p.amplitude_gain;
     if(statisticsKey!==this.statisticsKey) {this.updateStatistics();this.statisticsKey=statisticsKey;}
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
