@@ -1,0 +1,14 @@
+Nimbus Sans Regular
+Family: Nimbus Sans
+Style: Regular
+File: NimbusSans-Regular.otf (unmodified)
+Source: https://github.com/ArtifexSoftware/urw-base35-fonts
+Download: https://raw.githubusercontent.com/ArtifexSoftware/urw-base35-fonts/master/fonts/NimbusSans-Regular.otf
+Retrieved: 2026-10-02
+SHA-256: 7c25be4d78155523080ab85b10277150657ff7dabbcad7037bdd536c9b6d0d08
+
+The upstream licensing notice is reproduced in URW-LICENSE.txt and the full
+GNU Affero General Public License Version 3 is in URW-COPYING.txt. The
+upstream notice includes its special exception for font inclusion in
+Postscript or PDF documents. These files apply to the bundled font asset;
+the Python helper retains the repository's Apache-2.0 license.
