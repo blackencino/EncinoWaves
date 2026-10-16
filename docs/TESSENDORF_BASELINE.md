@@ -28,8 +28,10 @@ are deliberately absent here.
   shared-positive/negative-random-value bug.
 - Manual height gain follows SimOcean's `AMP / domain^2` scaling of the unnormalized
   inverse transform; horizontal displacement has its own independent `PINCH`
-  multiplier. The presentation starts at **100** height gain and **75** pinch, explicit artist
-  setting, not a fit to the modern ocean. The setup button restores the archived
+  multiplier. School opens at **150** height gain and **75** pinch: 50% taller than
+  the prior 100-gain opening, deliberately a little overdriven for the live tuning
+  demonstration. Subsequent artist gain choices survive model switches and examples.
+  This is an explicit artist setting, not a fit to the modern ocean. The setup button restores the archived
   SimOcean default **55/16 = 3.4375**, which is very small on the present large
   metre-scale patch. Gain remains visible and editable. No automatic wave-height
   matching is performed.

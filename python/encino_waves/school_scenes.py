@@ -44,7 +44,9 @@ def _camera(height, pitch, yaw, fov=SCHOOL_VERTICAL_FOV):
 def opening_scene(resolution=PREVIEW_RESOLUTION):
     return Scene(
         "Opening ocean", "17 m/s wind, 300 km fetch, 100 m depth",
-        Wave_parameters(resolution=resolution, domain=DOMAIN, trough_damping=1.0),
+        # Start the manual baseline a little overdriven for the live tuning demo.
+        Wave_parameters(resolution=resolution, domain=DOMAIN, trough_damping=1.0,
+                        phillips_amplitude=150.0),
         _camera(145.2, -18.1, -139.9), SCHOOL_LOOK,
     )
 
